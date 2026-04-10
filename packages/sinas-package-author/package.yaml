@@ -13,6 +13,17 @@ package:
 
 spec:
   # ─────────────────────────────────────────────
+  # Collection: versioned storage for package drafts
+  # ─────────────────────────────────────────────
+  collections:
+    - namespace: sinas
+      name: packages
+      allowSharedFiles: true
+      allowPrivateFiles: true
+      maxFileSizeMb: 10
+      maxTotalSizeGb: 1
+
+  # ─────────────────────────────────────────────
   # Skill: Sinas Package Author
   #
   # Knowledge-only resource. Any agent can enable it via:
