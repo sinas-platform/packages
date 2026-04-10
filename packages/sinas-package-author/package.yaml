@@ -273,6 +273,129 @@ spec:
         when the skill is always relevant; leave it false when it's
         situational and the agent should only fetch it on demand.
 
+        ### Connectors
+
+        Connectors define HTTP API integrations with operations, auth, and
+        retry configuration. Each operation maps to an API endpoint.
+
+        ```yaml
+        - namespace: hubspot
+          name: crm-api
+          description: HubSpot CRM v3 API
+          baseUrl: https://api.hubapi.com
+          auth:
+            type: bearer
+            secret: "{{HUBSPOT_ACCESS_TOKEN}}"
+          headers:
+            Content-Type: application/json
+          retry:
+            maxAttempts: 3
+            backoff: exponential
+          timeoutSeconds: 30
+          operations:
+            - name: search-deals
+              method: POST
+              path: /crm/v3/objects/deals/search
+              description: Search deals with filters and sorts
+              parameters:
+                - name: body
+                  in: body
+                  schema:
+                    type: object
+                    properties:
+                      filterGroups:
+                        type: array
+                      sorts:
+                        type: array
+                      limit:
+                        type: integer
+                      properties:
+                        type: array
+                        items:
+                          type: string
+            - name: get-deal
+              method: GET
+              path: /crm/v3/objects/deals/{dealId}
+              description: Get a specific deal by ID
+              parameters:
+                - name: dealId
+                  in: path
+                  schema:
+                    type: string
+                - name: properties
+                  in: query
+                  schema:
+                    type: string
+                    description: Comma-separated property names
+        ```
+
+        Key connector patterns:
+        - **Auth**: `type: bearer` with `secret: "{{SECRET_NAME}}"` references
+          a Sinas secret. Also supports `type: apiKey` with `header`/`position`.
+        - **Operations**: each has `method`, `path`, `description`, `parameters`.
+          Path parameters use `{paramName}` syntax.
+        - **Parameters**: `in: path`, `in: query`, `in: body`, or `in: header`.
+        - **Agent wiring**: agents reference connectors via `enabledConnectors`:
+          ```yaml
+          enabledConnectors:
+            - connector: hubspot/crm-api
+              operations: [search-deals, get-deal]
+          ```
+
+        ### Functions that call the Sinas API
+
+        Functions run in sandboxed containers and can call back into the Sinas
+        API using the access token from `context["access_token"]`. The API is
+        available at `http://host.docker.internal:8000` (Docker) or via the
+        `SINAS_BASE_URL` environment variable.
+
+        ```yaml
+        - namespace: myns
+          name: enrich_data
+          description: Enrich records by cross-referencing via API
+          sharedPool: true
+          timeout: 60
+          inputSchema:
+            type: object
+            properties:
+              record_ids:
+                type: array
+                items:
+                  type: string
+            required: [record_ids]
+          code: |
+            import requests
+
+            def handler(input_data, context):
+                base_url = "http://host.docker.internal:8000"
+                token = context["access_token"]
+                headers = {"Authorization": f"Bearer {token}"}
+
+                results = []
+                for record_id in input_data["record_ids"]:
+                    resp = requests.get(
+                        f"{base_url}/queries/myns/get-record/execute",
+                        headers=headers,
+                        json={"input": {"id": record_id}},
+                        timeout=10,
+                    )
+                    if resp.status_code == 200:
+                        results.append(resp.json())
+
+                return {"enriched": results, "count": len(results)}
+        ```
+
+        Key function patterns:
+        - **`context["access_token"]`**: bearer token for calling back into
+          Sinas (queries, files, agents, etc.)
+        - **`host.docker.internal:8000`**: the Sinas backend URL from inside
+          a Docker container
+        - **Query execution**: `POST /queries/{ns}/{name}/execute` with
+          `{"input": {params}}`
+        - **File download**: `GET /files/{ns}/{coll}/{filename}`
+        - **Agent invoke**: `POST /agents/{ns}/{name}/invoke` with
+          `{"message": "..."}`
+
         ## The authoring workflow
 
         When a user asks for a package, follow this loop:
@@ -281,27 +404,30 @@ spec:
            pointed questions: what data, what users, what the end goal is.
            Don't ask twenty questions — start drafting and iterate.
 
-        2. **Check for prior art.** Call `sinas_package_list()` to see
-           what's installed. If something similar exists, call
-           `sinas_package_export(name)` and use it as a reference.
+        2. **Draft from knowledge first.** Use the patterns and examples in
+           this skill to draft the YAML. This skill has complete examples
+           for all resource types. You may inspect the existing config
+           (via `sinas_config_list`, `sinas_package_export`) for context —
+           e.g. to check namespace conventions or avoid conflicts — but
+           do NOT copy patterns from the existing config as a template.
+           Existing configs may have bad practices or stale patterns.
 
-        3. **Draft.** Write the YAML inline in your reply. Use markdown
+        3. **Show the YAML.** Write it inline in your reply using markdown
            code fences so the user can read it.
 
         4. **Validate.** Call `sinas_package_validate(yaml)`. If there are
            errors, fix them and re-validate. Don't show the user broken
-           YAML — fix it first, then show the result.
+           YAML — fix it first, then show the clean result.
 
         5. **Preview.** Call `sinas_package_preview(yaml)` and share the
            diff: "This would create N queries, M functions, K agents.
            No conflicts with existing resources."
 
-        6. **Confirm.** Ask the user: "Should I install this?"
+        6. **Install.** Call `sinas_package_install(yaml)`. The user will
+           see an approval card and must approve before it runs. Do not
+           skip the preview step — the user needs to see the diff first.
 
-        7. **Install.** Call `sinas_package_install(yaml)`. The user will
-           get an approval card; once they approve, the install runs.
-
-        8. **Verify.** After install, call any introspection queries the
+        7. **Verify.** After install, call any introspection queries the
            package created (e.g. `dataset-overview`) to confirm it works.
 
         ## File-backed workflow
