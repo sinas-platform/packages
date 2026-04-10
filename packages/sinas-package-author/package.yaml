@@ -119,6 +119,7 @@ spec:
           skills: []
           stores: []
           components: []
+          connectors: []
           manifests: []
           templates: []
           webhooks: []
@@ -135,6 +136,7 @@ spec:
         - `skills` — Knowledge resources loaded into agents
         - `stores` — Key-value state stores
         - `components` — Renderable UI components
+        - `connectors` — HTTP API connectors with operations, auth, and retry config
         - `manifests` — Application manifests (formerly "apps")
         - `templates` — Reusable templates
         - `webhooks` — Inbound webhook handlers
