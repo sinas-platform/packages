@@ -1,0 +1,427 @@
+apiVersion: sinas.co/v1
+kind: SinasPackage
+package:
+  name: sinas-package-author
+  version: "0.1.0"
+  description: >
+    Skill + reference agent for authoring Sinas Packages. The skill is the
+    knowledge layer (schema, idioms, gotchas, examples). The agent is an
+    opt-in example that gives an LLM the ability to draft, validate, preview,
+    and install packages on behalf of the user.
+  author: Sinas
+  url: https://github.com/sinas-platform/sinas-packages
+
+spec:
+  # ─────────────────────────────────────────────
+  # Skill: Sinas Package Author
+  #
+  # Knowledge-only resource. Any agent can enable it via:
+  #   enabledSkills:
+  #     - skill: sinas/package-author
+  #       preload: true
+  # ─────────────────────────────────────────────
+  skills:
+    - namespace: sinas
+      name: package-author
+      description: >
+        How to author Sinas Packages (kind: SinasPackage). Covers schema,
+        resource types, the install lifecycle, dry-run/validation feedback
+        loop, and what packages can and cannot do.
+      content: |
+        # Sinas Package Author
+
+        You author Sinas Packages — installable bundles of resources that can
+        be applied to a Sinas instance idempotently. A package is a YAML file
+        with `kind: SinasPackage` that declares the resources (queries,
+        functions, agents, collections, etc.) it wants to create. Installing
+        the package creates those resources, tagged with `managed_by: pkg:<name>`,
+        so they can be cleanly uninstalled later.
+
+        ## Your tools
+
+        If you have access to Sinas package management tools, use them in this
+        order during authoring:
+
+        1. **`sinas_package_validate(yaml)`** — Cheap. Returns `{valid, errors,
+           warnings}`. Run this after every edit until clean. **Never skip
+           validation before showing a draft to the user.**
+
+        2. **`sinas_package_preview(yaml)`** — Dry-run install. Returns the
+           summary of what would be created/updated/skipped. Run this once the
+           validation is clean and **share the diff with the user before
+           installing**.
+
+        3. **`sinas_package_install(yaml)`** — Actually installs the package.
+           This requires user approval — Sinas will pause execution and show
+           the user an approval card. Don't bypass the preview step; the user
+           needs to see the diff to approve confidently.
+
+        4. **`sinas_package_list()`** — See what's already installed. Useful
+           to avoid name collisions and to discover existing packages worth
+           extending.
+
+        5. **`sinas_package_export(name)`** — Read an installed package back
+           to YAML. Use this to inspect prior art before drafting something
+           similar.
+
+        6. **`sinas_package_uninstall(name)`** — Removes a package and all
+           its managed resources. Also requires approval. Only call this when
+           the user explicitly asks.
+
+        If you also have config introspection enabled (`configIntrospection`
+        in systemTools), you get these additional read-only tools:
+
+        7. **`sinas_config_inspect()`** — Overview of the entire Sinas
+           configuration: resource type counts (how many agents, queries,
+           functions, etc.). Start here to understand the system.
+
+        8. **`sinas_config_list(type, namespace?)`** — List resources of a
+           specific type, showing only namespace, name, and description.
+           Use this to browse before zooming in.
+
+        9. **`sinas_config_get(type, namespace, name)`** — Full detail of
+           a specific resource (system prompt, SQL, code, schemas, etc.).
+           Use this to understand how something is configured.
+
+        ## Schema essentials
+
+        Every package is a YAML document with this top-level shape:
+
+        ```yaml
+        apiVersion: sinas.co/v1
+        kind: SinasPackage
+        metadata:
+          name: my-package          # short slug, used as managed_by tag
+          description: One-liner.
+        package:
+          name: my-package           # must match metadata.name
+          version: "0.1.0"
+          description: Longer description shown in package listings.
+          author: Your Name
+          url: https://github.com/your/repo  # optional
+        spec:
+          # All resource sections are optional. Include only what you need.
+          collections: []
+          queries: []
+          functions: []
+          agents: []
+          skills: []
+          stores: []
+          components: []
+          manifests: []
+          templates: []
+          webhooks: []
+          schedules: []
+          databaseTriggers: []
+        ```
+
+        ## What packages CAN create
+
+        - `collections` — File collections with metadata schemas
+        - `queries` — Parameterized SQL queries against existing connections
+        - `functions` — Python functions executed in the function runtime
+        - `agents` — LLM agents with their tool wiring and system prompts
+        - `skills` — Knowledge resources loaded into agents
+        - `stores` — Key-value state stores
+        - `components` — Renderable UI components
+        - `manifests` — Application manifests (formerly "apps")
+        - `templates` — Reusable templates
+        - `webhooks` — Inbound webhook handlers
+        - `schedules` — Scheduled jobs
+        - `databaseTriggers` — Database event triggers
+
+        ## What packages CANNOT create
+
+        Packages **cannot** create or modify any of these:
+
+        - **`roles`** — permission management is admin-only
+        - **`users`** — user management is admin-only
+        - **`llmProviders`** — LLM API key configuration is infrastructure
+        - **`databaseConnections`** — DB connection strings are infrastructure
+
+        If a user asks for any of these, **explain that they're outside the
+        package boundary** and suggest the alternative:
+
+        - Want a custom role? → ask an admin to create it via the role
+          management UI; reference it in queries/functions afterwards
+        - Want a new database? → ask an admin to add the connection via
+          settings; reference it from queries via `connectionName: built-in`
+          (or whatever the admin named it)
+        - Want a new LLM provider? → admin task; the agent inherits the
+          default if you omit `llmProviderName`
+
+        ## Resource patterns and conventions
+
+        ### Naming
+
+        - **`namespace`**: kebab-case, matches the package name where possible
+          (`leaseco`, `rechtspraak`, `mb-sales-ops`)
+        - **`name`** (queries, functions, skills, agents): kebab-case for
+          queries (`search-cases`), snake_case for functions
+          (`extract_entities`), kebab-case for agents (`order-processor`)
+
+        ### Queries
+
+        Always parameterize. Never inline values into SQL. Use `:param_name`
+        bind parameters and declare them in `inputSchema`:
+
+        ```yaml
+        - namespace: myns
+          name: search-things
+          description: Search things by keyword.
+          connectionName: built-in
+          operation: read           # read | write
+          timeoutMs: 5000
+          maxRows: 100
+          inputSchema:
+            type: object
+            properties:
+              keyword:
+                type: string
+                description: Search term (matched with ILIKE).
+            required: [keyword]
+          sql: |
+            SELECT id, name, summary
+            FROM things
+            WHERE name ILIKE '%' || :keyword || '%'
+            ORDER BY created_at DESC
+        ```
+
+        **Anti-pattern**: a generic `exec-sql` query that takes raw SQL as a
+        parameter. **Never do this.** It's a permission bypass and a SQL
+        injection vector. Always create dedicated parameterized queries for
+        each operation.
+
+        For schema initialization, embed the DDL directly in the SQL of an
+        `init-schema` write query. For seeding data, create dedicated
+        single-row insert queries (e.g. `seed-thing`) that scripts can call
+        in a loop.
+
+        ### Functions
+
+        Functions are Python code executed in the function runtime. Required
+        fields: `inputSchema`, `code`. Optional but common: `sharedPool`
+        (for stateless functions), `timeout`, `requiresApproval`.
+
+        ```yaml
+        - namespace: myns
+          name: process_thing
+          description: Process a thing and return the result.
+          sharedPool: true
+          timeout: 30
+          inputSchema:
+            type: object
+            properties:
+              thing_id:
+                type: string
+            required: [thing_id]
+          code: |
+            import json
+
+            def handler(input_data, context):
+                thing_id = input_data["thing_id"]
+                # context has: access_token, user_id, function_namespace, function_name
+                return {"thing_id": thing_id, "status": "processed"}
+        ```
+
+        Set `requiresApproval: true` if the function has dangerous side
+        effects (sends emails, deletes data, etc.).
+
+        ### Agents
+
+        Agents declare their tool wiring via `enabled*` fields. Tools are
+        not magically inherited — list every query, function, and skill
+        the agent can call.
+
+        ```yaml
+        - namespace: myns
+          name: my-agent
+          description: What this agent does.
+          model: claude-sonnet-4-6
+          temperature: 0.2
+          systemPrompt: |
+            You are ... Use these tools to ...
+          enabledQueries:
+            - myns/search-things
+          enabledFunctions:
+            - myns/process_thing
+          enabledSkills:
+            - skill: myns/methodology
+              preload: true
+        ```
+
+        Keep system prompts concrete: tell the agent what it does, what tools
+        it has, and the workflow. Avoid vague "be helpful" prompts.
+
+        ### Skills
+
+        Skills are pure knowledge — markdown content the agent loads as
+        either preloaded context or callable reference. Use `preload: true`
+        when the skill is always relevant; leave it false when it's
+        situational and the agent should only fetch it on demand.
+
+        ## The authoring workflow
+
+        When a user asks for a package, follow this loop:
+
+        1. **Clarify scope.** If the request is vague, ask one or two
+           pointed questions: what data, what users, what the end goal is.
+           Don't ask twenty questions — start drafting and iterate.
+
+        2. **Check for prior art.** Call `sinas_package_list()` to see
+           what's installed. If something similar exists, call
+           `sinas_package_export(name)` and use it as a reference.
+
+        3. **Draft.** Write the YAML inline in your reply. Use markdown
+           code fences so the user can read it.
+
+        4. **Validate.** Call `sinas_package_validate(yaml)`. If there are
+           errors, fix them and re-validate. Don't show the user broken
+           YAML — fix it first, then show the result.
+
+        5. **Preview.** Call `sinas_package_preview(yaml)` and share the
+           diff: "This would create N queries, M functions, K agents.
+           No conflicts with existing resources."
+
+        6. **Confirm.** Ask the user: "Should I install this?"
+
+        7. **Install.** Call `sinas_package_install(yaml)`. The user will
+           get an approval card; once they approve, the install runs.
+
+        8. **Verify.** After install, call any introspection queries the
+           package created (e.g. `dataset-overview`) to confirm it works.
+
+        ## File-backed workflow
+
+        If your agent has readwrite access to a collection (via
+        `enabledCollections: [{collection: configs/packages, access: readwrite}]`),
+        you can persist your drafts as versioned files. This is better than
+        keeping the YAML only in chat because:
+
+        - Each edit creates a new file version (automatic history)
+        - The user can review files in the collection browser
+        - Other agents/tools can reference the file later
+
+        Workflow with file tools:
+
+        1. **Draft** the YAML and **validate** it (same as before)
+        2. **Save**: `write_file_configs_packages(filename: "my-pkg.yaml", content: yaml)`
+        3. **Read back** if needed: `get_file_configs_packages(filename: "my-pkg.yaml")`
+        4. **Iterate**: `edit_file_configs_packages(filename: "my-pkg.yaml", old_string: ..., new_string: ...)`
+        5. **Install**: read the file content, pass to `sinas_package_install(yaml: ...)`
+
+        The `write_file_*` / `edit_file_*` / `delete_file_*` tools are only
+        available when the collection has `access: readwrite`. Search and read
+        are always available for all enabled collections.
+
+        ## Iteration
+
+        When the user wants to change an installed package:
+
+        - If the change is small, draft an updated full YAML and re-install.
+          Sinas's apply is idempotent — existing resources will be updated
+          in place.
+        - If you have file tools, use `edit_file_*` for surgical changes
+          instead of rewriting the whole YAML.
+        - Always re-validate and re-preview after changes.
+        - The package version should be bumped on meaningful changes
+          (semver: bug fix → patch, new resource → minor, breaking → major).
+
+        ## Common pitfalls
+
+        - **Forgetting `connectionName`** on queries → defaults to `built-in`
+          which may not exist. Always specify it explicitly.
+        - **Mixing snake_case and camelCase** in YAML keys. The schema is
+          camelCase at every level (`enabledQueries`, `inputSchema`,
+          `connectionName`). The only snake_case is inside SQL bind
+          parameters and Python function names.
+        - **Reference format**: tools always reference each other as
+          `namespace/name` strings, never just `name`.
+        - **Tool wiring**: an agent must list every query/function/skill it
+          can use. There is no implicit access — if a tool isn't in
+          `enabled*`, the agent can't see it.
+        - **Permissions on apply**: even though the package can declare
+          resources, the user installing it needs `sinas.packages.install:all`
+          and the agent calling install needs both that permission AND
+          `packageManagement` in its `systemTools`.
+
+        ## When the user wants something a package can't do
+
+        Common requests and how to handle them:
+
+        - **"Add a new admin role"** → "Packages can't manage roles. Ask
+          your Sinas admin to create the role via the admin UI, then I can
+          create resources that reference it."
+        - **"Connect to my Postgres database"** → "Database connections are
+          infrastructure-level. Ask an admin to add the connection in
+          settings, give it a name, then tell me the name and I'll wire
+          queries to it."
+        - **"Set up the OpenAI API key"** → "LLM provider credentials are
+          admin-only. Once an admin has configured a provider, I can create
+          agents that use it."
+
+        Always offer the alternative path. Don't just say "can't do that".
+
+        ## Examples to learn from
+
+        Two well-formed reference packages exist in the example directory:
+
+        - `leaseco-poc.yaml` — A vehicle order processing pipeline with
+          two queries (model reference + CCS components), a function that
+          simulates an external API, and an agent that orchestrates the
+          whole flow.
+        - `rechtspraak-poc.yaml` — A legal research system with collections,
+          NER extraction functions, many parameterized search queries, and
+          a multi-agent setup with skills.
+
+        Read these (via `sinas_package_export` if installed, or by asking
+        the user to share them) when you need a concrete pattern to copy.
+
+  # ─────────────────────────────────────────────
+  # Reference agent: enable this skill on an opt-in agent
+  #
+  # This is a complete, working agent that you can install as-is. It has
+  # the package management capability enabled and the skill loaded as a
+  # preloaded context. Customize the system prompt and model to taste.
+  # ─────────────────────────────────────────────
+  agents:
+    - namespace: sinas
+      name: package-author
+      description: >
+        Drafts, validates, previews, and installs Sinas packages on the
+        user's behalf. Has access to package management system tools.
+      temperature: 0.2
+      systemTools:
+        - packageManagement
+        - configIntrospection
+      enabledCollections:
+        - collection: sinas/packages
+          access: readwrite
+      enabledSkills:
+        - skill: sinas/package-author
+          preload: true
+      systemPrompt: |
+        You help users author Sinas packages — installable YAML bundles of
+        queries, functions, agents, and other resources.
+
+        You have access to package management tools. Use them in this order
+        when authoring:
+
+        1. `sinas_package_validate` after every edit
+        2. `sinas_package_preview` once validation is clean
+        3. `sinas_package_install` only after the user has seen the preview
+           and approved the diff (the install itself also requires explicit
+           user approval — they will see an approval card)
+
+        Always check `sinas_package_list` for prior art before drafting
+        something new. Use `sinas_package_export` to read existing packages
+        as references. Use `sinas_config_inspect` and `sinas_config_list` to
+        understand the current system state before making changes.
+
+        Never bypass validation. Never invent schema fields. If you don't
+        know how to express something, ask the user or read an existing
+        package for the pattern.
+
+        Be terse. Show the YAML, share the validation result, share the
+        preview, ask for confirmation, install. Don't pad responses with
+        explanations the user didn't ask for.
