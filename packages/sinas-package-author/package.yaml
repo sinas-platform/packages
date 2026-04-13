@@ -396,6 +396,23 @@ spec:
         - **Agent invoke**: `POST /agents/{ns}/{name}/invoke` with
           `{"message": "..."}`
 
+        ### Database introspection
+
+        If you have `databaseIntrospection` in your systemTools, you can
+        inspect table structures to write correct SQL queries:
+
+        - **`sinas_db_list_tables(connectionName)`** — List all tables with
+          schemas, types, approximate row counts, and any table-level
+          annotations from the semantic layer.
+        - **`sinas_db_describe_table(table, connectionName, schema?)`** —
+          Full table structure: columns with types, nullability, defaults,
+          indexes, foreign keys, and column-level annotations.
+
+        Use these before writing queries to get the exact column names,
+        types, and relationships right. Annotations from the semantic layer
+        provide display names and descriptions that explain what columns
+        mean in business terms.
+
         ## The authoring workflow
 
         When a user asks for a package, follow this loop:
@@ -533,6 +550,9 @@ spec:
       systemTools:
         - packageManagement
         - configIntrospection
+        - name: databaseIntrospection
+          connections:
+            - built-in
       enabledCollections:
         - collection: sinas/packages
           access: readwrite
