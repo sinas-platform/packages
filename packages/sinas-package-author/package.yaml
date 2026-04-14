@@ -240,6 +240,21 @@ spec:
         Set `requiresApproval: true` if the function has dangerous side
         effects (sends emails, deletes data, etc.).
 
+        **IMPORTANT — Dependencies & handler:**
+        - Every function MUST define `def handler(input_data, context):` as
+          its entry point. No other name works.
+        - If your function imports anything beyond stdlib,
+          add it to `spec.dependencies`:
+          ```yaml
+          spec:
+            dependencies:
+              - packageName: pandas
+              - packageName: python-pptx
+                version: "0.6.21"
+          ```
+          Without this, the function will crash at import time. Dependencies
+          are installed in containers on worker restart.
+
         ### Agents
 
         Agents declare their tool wiring via `enabled*` fields. Tools are
