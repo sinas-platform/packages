@@ -2,12 +2,11 @@ apiVersion: sinas.co/v1
 kind: SinasPackage
 package:
   name: sinas-package-author
-  version: "0.1.0"
+  version: "0.2.0"
   description: >
-    Skill + reference agent for authoring Sinas Packages. The skill is the
-    knowledge layer (schema, idioms, gotchas, examples). The agent is an
-    opt-in example that gives an LLM the ability to draft, validate, preview,
-    and install packages on behalf of the user.
+    Skills + reference agent for authoring Sinas Packages. Split into focused
+    skills: schema/workflow (preloaded), plus on-demand patterns for functions,
+    connectors, queries, and agents.
   author: Sinas
   url: https://github.com/sinas-platform/sinas-packages
 
@@ -24,94 +23,79 @@ spec:
       maxTotalSizeGb: 1
 
   # ─────────────────────────────────────────────
-  # Skill: Sinas Package Author
+  # Skills — split by topic for context efficiency
   #
-  # Knowledge-only resource. Any agent can enable it via:
-  #   enabledSkills:
-  #     - skill: sinas/package-author
-  #       preload: true
+  # Preloaded:
+  #   sinas/package-schema    — always needed (schema, workflow, pitfalls)
+  #
+  # On-demand (fetched when the agent needs them):
+  #   sinas/function-patterns  — handler, context, SDK, dependencies
+  #   sinas/connector-patterns — auth, operations, parameters
+  #   sinas/query-patterns     — SQL, connectionName, parameterization
+  #   sinas/agent-patterns     — enabledX, system prompt, skills
   # ─────────────────────────────────────────────
   skills:
+    # ── Preloaded: schema + workflow ──
     - namespace: sinas
-      name: package-author
+      name: package-schema
       description: >
-        How to author Sinas Packages (kind: SinasPackage). Covers schema,
-        resource types, the install lifecycle, dry-run/validation feedback
-        loop, and what packages can and cannot do.
+        Core knowledge for authoring Sinas Packages: YAML schema, available
+        tools, authoring workflow, file-backed drafting, iteration, common
+        pitfalls, and what packages can/cannot create. Always preload this.
       content: |
-        # Sinas Package Author
+        # Sinas Package Author — Schema & Workflow
 
         You author Sinas Packages — installable bundles of resources that can
         be applied to a Sinas instance idempotently. A package is a YAML file
-        with `kind: SinasPackage` that declares the resources (queries,
-        functions, agents, collections, etc.) it wants to create. Installing
-        the package creates those resources, tagged with `managed_by: pkg:<name>`,
-        so they can be cleanly uninstalled later.
+        with `kind: SinasPackage` that declares the resources it wants to
+        create. Installing the package creates those resources, tagged with
+        `managed_by: pkg:<name>`, so they can be cleanly uninstalled later.
 
         ## Your tools
 
-        If you have access to Sinas package management tools, use them in this
-        order during authoring:
+        Use package management tools in this order:
 
         1. **`sinas_package_validate(yaml)`** — Cheap. Returns `{valid, errors,
-           warnings}`. Run this after every edit until clean. **Never skip
-           validation before showing a draft to the user.**
+           warnings}`. Run after every edit. **Never skip validation.**
 
-        2. **`sinas_package_preview(yaml)`** — Dry-run install. Returns the
-           summary of what would be created/updated/skipped. Run this once the
-           validation is clean and **share the diff with the user before
-           installing**.
+        2. **`sinas_package_preview(yaml)`** — Dry-run install. Shows what
+           would be created/updated/skipped. Run once validation is clean
+           and **share the diff with the user before installing**.
 
-        3. **`sinas_package_install(yaml)`** — Actually installs the package.
-           This requires user approval — Sinas will pause execution and show
-           the user an approval card. Don't bypass the preview step; the user
-           needs to see the diff to approve confidently.
+        3. **`sinas_package_install(yaml)`** — Actually installs. Requires
+           user approval via approval card.
 
-        4. **`sinas_package_list()`** — See what's already installed. Useful
-           to avoid name collisions and to discover existing packages worth
-           extending.
+        4. **`sinas_package_list()`** — See what's installed.
 
-        5. **`sinas_package_export(name)`** — Read an installed package back
-           to YAML. Use this to inspect prior art before drafting something
-           similar.
+        5. **`sinas_package_export(name)`** — Read an installed package as YAML.
 
-        6. **`sinas_package_uninstall(name)`** — Removes a package and all
-           its managed resources. Also requires approval. Only call this when
-           the user explicitly asks.
+        6. **`sinas_package_uninstall(name)`** — Remove a package (requires approval).
 
-        If you also have config introspection enabled (`configIntrospection`
-        in systemTools), you get these additional read-only tools:
+        If you have config introspection:
 
-        7. **`sinas_config_inspect()`** — Overview of the entire Sinas
-           configuration: resource type counts (how many agents, queries,
-           functions, etc.). Start here to understand the system.
+        7. **`sinas_config_inspect()`** — Resource type counts (overview).
+        8. **`sinas_config_list(type, namespace?)`** — Names + descriptions.
+        9. **`sinas_config_get(type, namespace, name)`** — Full resource detail.
 
-        8. **`sinas_config_list(type, namespace?)`** — List resources of a
-           specific type, showing only namespace, name, and description.
-           Use this to browse before zooming in.
+        If you have database introspection:
 
-        9. **`sinas_config_get(type, namespace, name)`** — Full detail of
-           a specific resource (system prompt, SQL, code, schemas, etc.).
-           Use this to understand how something is configured.
+        10. **`sinas_db_list_tables(connectionName)`** — Tables with row counts
+            and annotations.
+        11. **`sinas_db_describe_table(table, connectionName)`** — Columns,
+            types, indexes, foreign keys, annotations.
 
         ## Schema essentials
-
-        Every package is a YAML document with this top-level shape:
 
         ```yaml
         apiVersion: sinas.co/v1
         kind: SinasPackage
-        metadata:
-          name: my-package          # short slug, used as managed_by tag
-          description: One-liner.
         package:
-          name: my-package           # must match metadata.name
+          name: my-package
           version: "0.1.0"
-          description: Longer description shown in package listings.
+          description: What this package does.
           author: Your Name
-          url: https://github.com/your/repo  # optional
+          url: https://github.com/your/repo
         spec:
-          # All resource sections are optional. Include only what you need.
           collections: []
           queries: []
           functions: []
@@ -125,96 +109,136 @@ spec:
           webhooks: []
           schedules: []
           databaseTriggers: []
+          dependencies: []
         ```
+
+        All sections are optional. Include only what you need.
 
         ## What packages CAN create
 
         - `collections` — File collections with metadata schemas
-        - `queries` — Parameterized SQL queries against existing connections
-        - `functions` — Python functions executed in the function runtime
-        - `agents` — LLM agents with their tool wiring and system prompts
+        - `queries` — Parameterized SQL queries against database connections
+        - `functions` — Python functions in the function runtime
+        - `agents` — LLM agents with tool wiring and system prompts
         - `skills` — Knowledge resources loaded into agents
         - `stores` — Key-value state stores
         - `components` — Renderable UI components
-        - `connectors` — HTTP API connectors with operations, auth, and retry config
-        - `manifests` — Application manifests (formerly "apps")
+        - `connectors` — HTTP API connectors with operations and auth
+        - `manifests` — Application manifests
         - `templates` — Reusable templates
         - `webhooks` — Inbound webhook handlers
         - `schedules` — Scheduled jobs
         - `databaseTriggers` — Database event triggers
+        - `dependencies` — Python packages (installed on worker restart)
 
         ## What packages CANNOT create
 
-        Packages **cannot** create or modify any of these:
-
         - **`roles`** — permission management is admin-only
         - **`users`** — user management is admin-only
-        - **`llmProviders`** — LLM API key configuration is infrastructure
-        - **`databaseConnections`** — DB connection strings are infrastructure
+        - **`llmProviders`** — LLM API keys are infrastructure
+        - **`databaseConnections`** — DB credentials are infrastructure
 
-        If a user asks for any of these, **explain that they're outside the
-        package boundary** and suggest the alternative:
+        Suggest the admin create these manually when a user asks.
 
-        - Want a custom role? → ask an admin to create it via the role
-          management UI; reference it in queries/functions afterwards
-        - Want a new database? → ask an admin to add the connection via
-          settings; reference it from queries via `connectionName: built-in`
-          (or whatever the admin named it)
-        - Want a new LLM provider? → admin task; the agent inherits the
-          default if you omit `llmProviderName`
+        ## Naming conventions
 
-        ## Resource patterns and conventions
+        - **`namespace`**: kebab-case (`leaseco`, `hubspot`, `mb-sales-ops`)
+        - **queries**: kebab-case (`search-cases`, `init-schema`)
+        - **functions**: snake_case (`extract_entities`, `process_thing`)
+        - **agents**: kebab-case (`order-processor`, `sales-pipeline`)
 
-        ### Naming
+        ## The authoring workflow
 
-        - **`namespace`**: kebab-case, matches the package name where possible
-          (`leaseco`, `rechtspraak`, `mb-sales-ops`)
-        - **`name`** (queries, functions, skills, agents): kebab-case for
-          queries (`search-cases`), snake_case for functions
-          (`extract_entities`), kebab-case for agents (`order-processor`)
+        1. **Clarify scope.** Ask 1-2 pointed questions if vague.
 
-        ### Queries
+        2. **Draft from knowledge first.** Use the patterns in these skills.
+           You may inspect the existing config for context (namespace
+           conventions, avoid conflicts) but do NOT copy patterns from it.
 
-        Always parameterize. Never inline values into SQL. Use `:param_name`
-        bind parameters and declare them in `inputSchema`:
+        3. **Show the YAML** inline with markdown code fences.
 
-        ```yaml
-        - namespace: myns
-          name: search-things
-          description: Search things by keyword.
-          connectionName: built-in
-          operation: read           # read | write
-          timeoutMs: 5000
-          maxRows: 100
-          inputSchema:
-            type: object
-            properties:
-              keyword:
-                type: string
-                description: Search term (matched with ILIKE).
-            required: [keyword]
-          sql: |
-            SELECT id, name, summary
-            FROM things
-            WHERE name ILIKE '%' || :keyword || '%'
-            ORDER BY created_at DESC
+        4. **Validate.** Call `sinas_package_validate(yaml)`. Fix errors
+           and re-validate. Show the clean result.
+
+        5. **Preview.** Call `sinas_package_preview(yaml)` and share the
+           diff with the user.
+
+        6. **Install.** Call `sinas_package_install(yaml)`. User sees an
+           approval card and must approve.
+
+        7. **Verify.** Call introspection queries to confirm it works.
+
+        ## File-backed workflow
+
+        If you have readwrite access to a collection, persist drafts as
+        versioned files:
+
+        1. Draft and validate (same as above)
+        2. Save: `write_file_configs_packages(filename, yaml)`
+        3. Iterate: `edit_file_configs_packages(filename, old_string, new_string)`
+        4. Install: read the file, pass to `sinas_package_install(yaml)`
+
+        ## Iteration
+
+        - Re-installing updates in place (idempotent apply)
+        - Use `edit_file_*` for surgical changes
+        - Always re-validate and re-preview
+        - Bump version on meaningful changes (semver)
+
+        ## Common pitfalls
+
+        - **Missing `connectionName`** on queries — always specify explicitly
+        - **camelCase everywhere** in YAML keys (`enabledQueries`, `inputSchema`,
+          `connectionName`). Only snake_case inside SQL and Python.
+        - **Reference format**: always `namespace/name`, never just `name`
+        - **Tool wiring**: agents must list every tool explicitly in `enabled*`
+        - **Unknown YAML keys are rejected** — no `pipPackages`, only `dependencies`
+
+        ## When the user wants something a package can't do
+
+        - "Add a role" → admin creates it via UI, then reference in queries
+        - "Connect to my database" → admin adds connection in settings,
+          give you the name, you wire queries to it
+        - "Set up API key" → admin configures provider, agents inherit default
+
+        ## Resource pattern skills
+
+        For detailed patterns when writing specific resource types, fetch
+        the on-demand skills:
+
+        - **Functions**: `sinas/function-patterns` — handler, context, SDK, deps
+        - **Connectors**: `sinas/connector-patterns` — auth, operations, params
+        - **Queries**: `sinas/query-patterns` — SQL, params, init-schema
+        - **Agents**: `sinas/agent-patterns` — enabledX, prompts, skills
+
+    # ── On-demand: function patterns ──
+    - namespace: sinas
+      name: function-patterns
+      description: >
+        How to write Sinas functions: handler signature, context dict,
+        Sinas Python SDK, raw requests, secrets, and dependency declaration.
+      content: |
+        # Function Patterns
+
+        ## Handler signature
+
+        Every function MUST define this exact entry point:
+
+        ```python
+        def handler(input_data, context):
+            # input_data: dict — validated input from inputSchema
+            # context: dict with these keys:
+            #   "access_token"  — JWT bearer token for Sinas API calls
+            #   "user_id"       — calling user's UUID
+            #   "user_email"    — calling user's email
+            #   "execution_id"  — unique ID for this execution
+            #   "trigger_type"  — "manual", "agent", "webhook", "schedule", etc.
+            #   "chat_id"       — chat UUID (if triggered by agent, else None)
+            #   "secrets"       — dict {"SECRET_NAME": "value"}
+            return {"result": "..."}
         ```
 
-        **Anti-pattern**: a generic `exec-sql` query that takes raw SQL as a
-        parameter. **Never do this.** It's a permission bypass and a SQL
-        injection vector. Always create dedicated parameterized queries for
-        each operation.
-
-        For schema initialization, embed the DDL directly in the SQL of an
-        `init-schema` write query. For seeding data, create dedicated
-        single-row insert queries (e.g. `seed-thing`) that scripts can call
-        in a loop.
-
-        ### Functions
-
-        Functions are Python code executed in the function runtime. Required
-        fields: `inputSchema`, `code`. Optional but common: `sharedPool`
-        (for stateless functions), `timeout`, `requiresApproval`.
+        ## YAML definition
 
         ```yaml
         - namespace: myns
@@ -229,69 +253,104 @@ spec:
                 type: string
             required: [thing_id]
           code: |
-            import json
-
             def handler(input_data, context):
                 thing_id = input_data["thing_id"]
-                # context has: access_token, user_id, function_namespace, function_name
                 return {"thing_id": thing_id, "status": "processed"}
         ```
 
-        Set `requiresApproval: true` if the function has dangerous side
-        effects (sends emails, deletes data, etc.).
+        Set `requiresApproval: true` for dangerous side effects.
 
-        **IMPORTANT — Dependencies & handler:**
-        - Every function MUST define `def handler(input_data, context):` as
-          its entry point. No other name works.
-        - If your function imports anything beyond stdlib,
-          add it to `spec.dependencies`:
-          ```yaml
-          spec:
-            dependencies:
-              - packageName: pandas
-              - packageName: python-pptx
-                version: "0.6.21"
-          ```
-          Without this, the function will crash at import time. Dependencies
-          are installed in containers on worker restart.
+        ## Dependencies
 
-        ### Agents
-
-        Agents declare their tool wiring via `enabled*` fields. Tools are
-        not magically inherited — list every query, function, and skill
-        the agent can call.
+        If your function imports anything beyond stdlib, add to
+        `spec.dependencies` (NOT `pipPackages` — unknown keys are rejected):
 
         ```yaml
-        - namespace: myns
-          name: my-agent
-          description: What this agent does.
-          model: claude-sonnet-4-6
-          temperature: 0.2
-          systemPrompt: |
-            You are ... Use these tools to ...
-          enabledQueries:
-            - myns/search-things
-          enabledFunctions:
-            - myns/process_thing
-          enabledSkills:
-            - skill: myns/methodology
-              preload: true
+        spec:
+          dependencies:
+            - packageName: pandas
+            - packageName: python-pptx
+              version: "0.6.21"
+          functions:
+            - namespace: myns
+              name: generate_report
+              code: |
+                import pandas as pd
+                def handler(input_data, context):
+                    ...
         ```
 
-        Keep system prompts concrete: tell the agent what it does, what tools
-        it has, and the workflow. Avoid vague "be helpful" prompts.
+        ## Sinas Python SDK
 
-        ### Skills
+        Pre-installed in all containers as `sinas==0.1.7`:
 
-        Skills are pure knowledge — markdown content the agent loads as
-        either preloaded context or callable reference. Use `preload: true`
-        when the skill is always relevant; leave it false when it's
-        situational and the agent should only fetch it on demand.
+        ```python
+        from sinas import SinasClient
 
-        ### Connectors
+        def handler(input_data, context):
+            client = SinasClient(
+                base_url="http://host.docker.internal:8000",
+                token=context["access_token"],
+            )
 
-        Connectors define HTTP API integrations with operations, auth, and
-        retry configuration. Each operation maps to an API endpoint.
+            # Execute a query
+            resp = client._request("POST",
+                "/queries/myns/get-record/execute",
+                json={"input": {"id": "123"}},
+            )
+
+            # File operations
+            client.files.list("ns", "collection")
+            client.files.download_bytes("ns", "collection", "filename")
+            client.files.upload_bytes("ns", "collection", content, "file.txt", "text/plain")
+
+            # State operations
+            client.state.set(store="ns/name", key="k", value={"data": 1})
+            client.state.list(store="ns/name")
+
+            # Agent invoke
+            client.chats.invoke("ns", "agent-name", message="...")
+
+            return {"result": resp}
+        ```
+
+        ## Raw requests alternative
+
+        ```python
+        def handler(input_data, context):
+            import requests
+            base_url = "http://host.docker.internal:8000"
+            headers = {"Authorization": f"Bearer {context['access_token']}"}
+
+            resp = requests.post(
+                f"{base_url}/queries/myns/get-record/execute",
+                headers=headers,
+                json={"input": {"id": "123"}},
+                timeout=10,
+            )
+            return resp.json()
+        ```
+
+        ## Secrets
+
+        ```python
+        def handler(input_data, context):
+            api_key = context["secrets"]["OPENAI_API_KEY"]
+            # Use api_key directly...
+        ```
+
+        Secrets are resolved per-user (private overrides shared).
+
+    # ── On-demand: connector patterns ──
+    - namespace: sinas
+      name: connector-patterns
+      description: >
+        How to define HTTP API connectors: auth types, operations,
+        parameters, retry config, and agent wiring.
+      content: |
+        # Connector Patterns
+
+        ## Full example
 
         ```yaml
         - namespace: hubspot
@@ -344,256 +403,219 @@ spec:
                     description: Comma-separated property names
         ```
 
-        Key connector patterns:
-        - **Auth**: `type: bearer` with `secret: "{{SECRET_NAME}}"` references
-          a Sinas secret. Also supports `type: apiKey` with `header`/`position`.
-        - **Operations**: each has `method`, `path`, `description`, `parameters`.
-          Path parameters use `{paramName}` syntax.
-        - **Parameters**: `in: path`, `in: query`, `in: body`, or `in: header`.
-        - **Agent wiring**: agents reference connectors via `enabledConnectors`:
-          ```yaml
-          enabledConnectors:
-            - connector: hubspot/crm-api
-              operations: [search-deals, get-deal]
-          ```
+        ## Auth types
 
-        ### Functions that call the Sinas API
+        - `type: bearer` with `secret: "{{SECRET_NAME}}"` — references a
+          Sinas secret
+        - `type: apiKey` with `header`, `position` (`header`/`query`),
+          `paramName`
 
-        Every function receives two arguments:
+        ## Operations
 
-        ```python
-        def handler(input_data, context):
-            # input_data: dict — the validated input from inputSchema
-            # context: dict with these keys:
-            #   "access_token"       — JWT bearer token for Sinas API calls
-            #   "user_id"            — calling user's UUID
-            #   "user_email"         — calling user's email
-            #   "execution_id"       — unique ID for this execution
-            #   "trigger_type"       — "manual", "agent", "webhook", "schedule", etc.
-            #   "chat_id"            — chat UUID (if triggered by agent, else None)
-            #   "secrets"            — dict of resolved secrets {"SECRET_NAME": "value"}
+        Each operation has: `name`, `method`, `path`, `description`,
+        `parameters`.
+
+        Path parameters use `{paramName}` syntax.
+
+        Parameter `in` values: `path`, `query`, `body`, `header`.
+
+        ## Agent wiring
+
+        ```yaml
+        enabledConnectors:
+          - connector: hubspot/crm-api
+            operations: [search-deals, get-deal]
         ```
 
-        **Using the `sinas` Python SDK** (recommended, pre-installed in all
-        containers as `sinas==0.1.7`):
+        Operations listed here are the only ones the agent can call.
+
+    # ── On-demand: query patterns ──
+    - namespace: sinas
+      name: query-patterns
+      description: >
+        How to write parameterized SQL queries: bind parameters,
+        inputSchema, connectionName, read vs write, init-schema pattern.
+      content: |
+        # Query Patterns
+
+        ## Parameterized query
 
         ```yaml
         - namespace: myns
-          name: enrich_data
-          description: Enrich records by cross-referencing via API
-          sharedPool: true
-          timeout: 60
+          name: search-things
+          description: Search things by keyword.
+          connectionName: built-in
+          operation: read
+          timeoutMs: 5000
+          maxRows: 100
           inputSchema:
             type: object
             properties:
-              record_ids:
-                type: array
-                items:
-                  type: string
-            required: [record_ids]
-          code: |
-            from sinas import SinasClient
-
-            def handler(input_data, context):
-                client = SinasClient(
-                    base_url="http://host.docker.internal:8000",
-                    token=context["access_token"],
-                )
-
-                results = []
-                for record_id in input_data["record_ids"]:
-                    # Execute a query
-                    resp = client._request("POST",
-                        f"/queries/myns/get-record/execute",
-                        json={"input": {"id": record_id}},
-                    )
-                    results.append(resp)
-
-                # File operations
-                # client.files.list("ns", "collection")
-                # client.files.download_bytes("ns", "collection", "filename")
-                # client.files.upload_bytes("ns", "collection", content, "file.txt", "text/plain")
-
-                # State operations
-                # client.state.set(store="ns/name", key="k", value={"data": 1})
-                # client.state.get(state_id)
-                # client.state.list(store="ns/name")
-
-                # Agent invoke
-                # client.chats.invoke("ns", "agent-name", message="...")
-
-                return {"enriched": results, "count": len(results)}
+              keyword:
+                type: string
+                description: Search term (matched with ILIKE).
+            required: [keyword]
+          sql: |
+            SELECT id, name, summary
+            FROM things
+            WHERE name ILIKE '%' || :keyword || '%'
+            ORDER BY created_at DESC
         ```
 
-        **Alternative: raw `requests`** (also pre-installed):
+        ## Key rules
 
-        ```python
-        def handler(input_data, context):
-            import requests
-            base_url = "http://host.docker.internal:8000"
-            headers = {"Authorization": f"Bearer {context['access_token']}"}
+        - Always use `:param_name` bind parameters — NEVER inline values
+        - Always specify `connectionName` explicitly
+        - `operation: read` for SELECT, `operation: write` for INSERT/UPDATE/DELETE
+        - `maxRows` caps results for read queries (default 1000)
+        - `timeoutMs` prevents runaway queries
 
-            resp = requests.post(
-                f"{base_url}/queries/myns/get-record/execute",
-                headers=headers,
-                json={"input": {"id": "123"}},
-                timeout=10,
-            )
-            return resp.json()
+        ## Schema initialization pattern
+
+        ```yaml
+        - namespace: myns
+          name: init-schema
+          description: Create tables. Safe to run multiple times.
+          connectionName: built-in
+          operation: write
+          timeoutMs: 30000
+          sql: |
+            CREATE TABLE IF NOT EXISTS things (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name TEXT NOT NULL,
+                summary TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_things_name ON things (name);
         ```
 
-        **Accessing secrets**: use `context["secrets"]["SECRET_NAME"]` for
-        credentials. Secrets are resolved per-user (private overrides shared).
+        ## Seeding data pattern
 
-        ```python
-        def handler(input_data, context):
-            api_key = context["secrets"]["OPENAI_API_KEY"]
-            # Use api_key directly...
+        Create single-row insert queries that scripts call in a loop:
+
+        ```yaml
+        - namespace: myns
+          name: seed-thing
+          connectionName: built-in
+          operation: write
+          inputSchema:
+            type: object
+            properties:
+              name: { type: string }
+              summary: { type: string }
+            required: [name]
+          sql: |
+            INSERT INTO things (name, summary) VALUES (:name, :summary)
+            ON CONFLICT DO NOTHING
         ```
 
-        ### Database introspection
+        ## Anti-pattern
 
-        If you have `databaseIntrospection` in your systemTools, you can
-        inspect table structures to write correct SQL queries:
+        NEVER create a generic `exec-sql` query that takes raw SQL as a
+        parameter. It's a SQL injection vector.
 
-        - **`sinas_db_list_tables(connectionName)`** — List all tables with
-          schemas, types, approximate row counts, and any table-level
-          annotations from the semantic layer.
-        - **`sinas_db_describe_table(table, connectionName, schema?)`** —
-          Full table structure: columns with types, nullability, defaults,
-          indexes, foreign keys, and column-level annotations.
+    # ── On-demand: agent patterns ──
+    - namespace: sinas
+      name: agent-patterns
+      description: >
+        How to configure agents: enabledX fields, system prompts, skills,
+        systemTools, collections, connectors, hooks, and input schema.
+      content: |
+        # Agent Patterns
 
-        Use these before writing queries to get the exact column names,
-        types, and relationships right. Annotations from the semantic layer
-        provide display names and descriptions that explain what columns
-        mean in business terms.
+        ## Basic agent
 
-        ## The authoring workflow
+        ```yaml
+        - namespace: myns
+          name: my-agent
+          description: What this agent does.
+          model: claude-sonnet-4-6
+          temperature: 0.2
+          systemPrompt: |
+            You are ... Use these tools to ...
+          enabledQueries:
+            - myns/search-things
+          enabledFunctions:
+            - myns/process_thing
+          enabledSkills:
+            - skill: myns/methodology
+              preload: true
+        ```
 
-        When a user asks for a package, follow this loop:
+        ## Key rules
 
-        1. **Clarify scope.** If the request is vague, ask one or two
-           pointed questions: what data, what users, what the end goal is.
-           Don't ask twenty questions — start drafting and iterate.
+        - List every tool explicitly in `enabled*` — no implicit access
+        - `enabledSkills` with `preload: true` injects into system prompt;
+          `preload: false` (default) makes it a fetchable tool
+        - Keep system prompts concrete: what the agent does, what tools
+          it has, the workflow. No vague "be helpful."
 
-        2. **Draft from knowledge first.** Use the patterns and examples in
-           this skill to draft the YAML. This skill has complete examples
-           for all resource types. You may inspect the existing config
-           (via `sinas_config_list`, `sinas_package_export`) for context —
-           e.g. to check namespace conventions or avoid conflicts — but
-           do NOT copy patterns from the existing config as a template.
-           Existing configs may have bad practices or stale patterns.
+        ## Collections with access mode
 
-        3. **Show the YAML.** Write it inline in your reply using markdown
-           code fences so the user can read it.
+        ```yaml
+        enabledCollections:
+          - collection: myns/documents
+            access: readonly
+          - collection: myns/drafts
+            access: readwrite
+        ```
 
-        4. **Validate.** Call `sinas_package_validate(yaml)`. If there are
-           errors, fix them and re-validate. Don't show the user broken
-           YAML — fix it first, then show the clean result.
+        `readwrite` enables `write_file_*`, `edit_file_*`, `delete_file_*`
+        tools. `readonly` (default) gives `search_collection_*` and
+        `get_file_*` only.
 
-        5. **Preview.** Call `sinas_package_preview(yaml)` and share the
-           diff: "This would create N queries, M functions, K agents.
-           No conflicts with existing resources."
+        ## Connector wiring
 
-        6. **Install.** Call `sinas_package_install(yaml)`. The user will
-           see an approval card and must approve before it runs. Do not
-           skip the preview step — the user needs to see the diff first.
+        ```yaml
+        enabledConnectors:
+          - connector: hubspot/crm-api
+            operations: [search-deals, get-deal]
+        ```
 
-        7. **Verify.** After install, call any introspection queries the
-           package created (e.g. `dataset-overview`) to confirm it works.
+        Only listed operations are exposed as tools.
 
-        ## File-backed workflow
+        ## System tools
 
-        If your agent has readwrite access to a collection (via
-        `enabledCollections: [{collection: configs/packages, access: readwrite}]`),
-        you can persist your drafts as versioned files. This is better than
-        keeping the YAML only in chat because:
+        ```yaml
+        systemTools:
+          - codeExecution
+          - packageManagement
+          - configIntrospection
+          - name: databaseIntrospection
+            connections:
+              - built-in
+        ```
 
-        - Each edit creates a new file version (automatic history)
-        - The user can review files in the collection browser
-        - Other agents/tools can reference the file later
+        ## Input schema
 
-        Workflow with file tools:
+        Validates input variables passed when creating a chat:
 
-        1. **Draft** the YAML and **validate** it (same as before)
-        2. **Save**: `write_file_configs_packages(filename: "my-pkg.yaml", content: yaml)`
-        3. **Read back** if needed: `get_file_configs_packages(filename: "my-pkg.yaml")`
-        4. **Iterate**: `edit_file_configs_packages(filename: "my-pkg.yaml", old_string: ..., new_string: ...)`
-        5. **Install**: read the file content, pass to `sinas_package_install(yaml: ...)`
+        ```yaml
+        inputSchema:
+          type: object
+          properties:
+            company_name:
+              type: string
+            pipeline_id:
+              type: string
+          required: [company_name]
+        ```
 
-        The `write_file_*` / `edit_file_*` / `delete_file_*` tools are only
-        available when the collection has `access: readwrite`. Search and read
-        are always available for all enabled collections.
+        Input variables are available in system prompt via Jinja2:
+        `{{ company_name }}`.
 
-        ## Iteration
+        ## Stores
 
-        When the user wants to change an installed package:
-
-        - If the change is small, draft an updated full YAML and re-install.
-          Sinas's apply is idempotent — existing resources will be updated
-          in place.
-        - If you have file tools, use `edit_file_*` for surgical changes
-          instead of rewriting the whole YAML.
-        - Always re-validate and re-preview after changes.
-        - The package version should be bumped on meaningful changes
-          (semver: bug fix → patch, new resource → minor, breaking → major).
-
-        ## Common pitfalls
-
-        - **Forgetting `connectionName`** on queries → defaults to `built-in`
-          which may not exist. Always specify it explicitly.
-        - **Mixing snake_case and camelCase** in YAML keys. The schema is
-          camelCase at every level (`enabledQueries`, `inputSchema`,
-          `connectionName`). The only snake_case is inside SQL bind
-          parameters and Python function names.
-        - **Reference format**: tools always reference each other as
-          `namespace/name` strings, never just `name`.
-        - **Tool wiring**: an agent must list every query/function/skill it
-          can use. There is no implicit access — if a tool isn't in
-          `enabled*`, the agent can't see it.
-        - **Permissions on apply**: even though the package can declare
-          resources, the user installing it needs `sinas.packages.install:all`
-          and the agent calling install needs both that permission AND
-          `packageManagement` in its `systemTools`.
-
-        ## When the user wants something a package can't do
-
-        Common requests and how to handle them:
-
-        - **"Add a new admin role"** → "Packages can't manage roles. Ask
-          your Sinas admin to create the role via the admin UI, then I can
-          create resources that reference it."
-        - **"Connect to my Postgres database"** → "Database connections are
-          infrastructure-level. Ask an admin to add the connection in
-          settings, give it a name, then tell me the name and I'll wire
-          queries to it."
-        - **"Set up the OpenAI API key"** → "LLM provider credentials are
-          admin-only. Once an admin has configured a provider, I can create
-          agents that use it."
-
-        Always offer the alternative path. Don't just say "can't do that".
-
-        ## Examples to learn from
-
-        Two well-formed reference packages exist in the example directory:
-
-        - `leaseco-poc.yaml` — A vehicle order processing pipeline with
-          two queries (model reference + CCS components), a function that
-          simulates an external API, and an agent that orchestrates the
-          whole flow.
-        - `rechtspraak-poc.yaml` — A legal research system with collections,
-          NER extraction functions, many parameterized search queries, and
-          a multi-agent setup with skills.
-
-        Read these (via `sinas_package_export` if installed, or by asking
-        the user to share them) when you need a concrete pattern to copy.
+        ```yaml
+        enabledStores:
+          - store: myns/memory
+            access: readwrite
+          - store: myns/config
+            access: readonly
+        ```
 
   # ─────────────────────────────────────────────
-  # Reference agent: enable this skill on an opt-in agent
-  #
-  # This is a complete, working agent that you can install as-is. It has
-  # the package management capability enabled and the skill loaded as a
-  # preloaded context. Customize the system prompt and model to taste.
+  # Reference agent
   # ─────────────────────────────────────────────
   agents:
     - namespace: sinas
@@ -612,8 +634,16 @@ spec:
         - collection: sinas/packages
           access: readwrite
       enabledSkills:
-        - skill: sinas/package-author
+        - skill: sinas/package-schema
           preload: true
+        - skill: sinas/function-patterns
+          preload: false
+        - skill: sinas/connector-patterns
+          preload: false
+        - skill: sinas/query-patterns
+          preload: false
+        - skill: sinas/agent-patterns
+          preload: false
       systemPrompt: |
         You help users author Sinas packages — installable YAML bundles of
         queries, functions, agents, and other resources.
@@ -632,9 +662,13 @@ spec:
         as references. Use `sinas_config_inspect` and `sinas_config_list` to
         understand the current system state before making changes.
 
+        When writing functions, connectors, queries, or agents, fetch the
+        relevant pattern skill first (e.g. get_skill_sinas__function_patterns)
+        to ensure you follow the correct patterns.
+
         Never bypass validation. Never invent schema fields. If you don't
-        know how to express something, ask the user or read an existing
-        package for the pattern.
+        know how to express something, fetch the relevant skill or read an
+        existing package for the pattern.
 
         Be terse. Show the YAML, share the validation result, share the
         preview, ask for confirmation, install. Don't pad responses with
