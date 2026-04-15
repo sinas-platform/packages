@@ -359,10 +359,23 @@ spec:
 
         ### Functions that call the Sinas API
 
-        Functions run in sandboxed containers and can call back into the Sinas
-        API using the access token from `context["access_token"]`. The API is
-        available at `http://host.docker.internal:8000` (Docker) or via the
-        `SINAS_BASE_URL` environment variable.
+        Every function receives two arguments:
+
+        ```python
+        def handler(input_data, context):
+            # input_data: dict — the validated input from inputSchema
+            # context: dict with these keys:
+            #   "access_token"       — JWT bearer token for Sinas API calls
+            #   "user_id"            — calling user's UUID
+            #   "user_email"         — calling user's email
+            #   "execution_id"       — unique ID for this execution
+            #   "trigger_type"       — "manual", "agent", "webhook", "schedule", etc.
+            #   "chat_id"            — chat UUID (if triggered by agent, else None)
+            #   "secrets"            — dict of resolved secrets {"SECRET_NAME": "value"}
+        ```
+
+        **Using the `sinas` Python SDK** (recommended, pre-installed in all
+        containers as `sinas==0.1.7`):
 
         ```yaml
         - namespace: myns
@@ -379,37 +392,64 @@ spec:
                   type: string
             required: [record_ids]
           code: |
-            import requests
+            from sinas import SinasClient
 
             def handler(input_data, context):
-                base_url = "http://host.docker.internal:8000"
-                token = context["access_token"]
-                headers = {"Authorization": f"Bearer {token}"}
+                client = SinasClient(
+                    base_url="http://host.docker.internal:8000",
+                    token=context["access_token"],
+                )
 
                 results = []
                 for record_id in input_data["record_ids"]:
-                    resp = requests.get(
-                        f"{base_url}/queries/myns/get-record/execute",
-                        headers=headers,
+                    # Execute a query
+                    resp = client._request("POST",
+                        f"/queries/myns/get-record/execute",
                         json={"input": {"id": record_id}},
-                        timeout=10,
                     )
-                    if resp.status_code == 200:
-                        results.append(resp.json())
+                    results.append(resp)
+
+                # File operations
+                # client.files.list("ns", "collection")
+                # client.files.download_bytes("ns", "collection", "filename")
+                # client.files.upload_bytes("ns", "collection", content, "file.txt", "text/plain")
+
+                # State operations
+                # client.state.set(store="ns/name", key="k", value={"data": 1})
+                # client.state.get(state_id)
+                # client.state.list(store="ns/name")
+
+                # Agent invoke
+                # client.chats.invoke("ns", "agent-name", message="...")
 
                 return {"enriched": results, "count": len(results)}
         ```
 
-        Key function patterns:
-        - **`context["access_token"]`**: bearer token for calling back into
-          Sinas (queries, files, agents, etc.)
-        - **`host.docker.internal:8000`**: the Sinas backend URL from inside
-          a Docker container
-        - **Query execution**: `POST /queries/{ns}/{name}/execute` with
-          `{"input": {params}}`
-        - **File download**: `GET /files/{ns}/{coll}/{filename}`
-        - **Agent invoke**: `POST /agents/{ns}/{name}/invoke` with
-          `{"message": "..."}`
+        **Alternative: raw `requests`** (also pre-installed):
+
+        ```python
+        def handler(input_data, context):
+            import requests
+            base_url = "http://host.docker.internal:8000"
+            headers = {"Authorization": f"Bearer {context['access_token']}"}
+
+            resp = requests.post(
+                f"{base_url}/queries/myns/get-record/execute",
+                headers=headers,
+                json={"input": {"id": "123"}},
+                timeout=10,
+            )
+            return resp.json()
+        ```
+
+        **Accessing secrets**: use `context["secrets"]["SECRET_NAME"]` for
+        credentials. Secrets are resolved per-user (private overrides shared).
+
+        ```python
+        def handler(input_data, context):
+            api_key = context["secrets"]["OPENAI_API_KEY"]
+            # Use api_key directly...
+        ```
 
         ### Database introspection
 
