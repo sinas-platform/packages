@@ -149,40 +149,41 @@ spec:
 
         ## The authoring workflow
 
+        **Always write to a file first.** The file is the source of truth.
+        Never pass YAML inline to validate/preview/install — always read
+        from the file. This enables surgical edits and avoids regenerating
+        the full YAML on every change.
+
         1. **Clarify scope.** Ask 1-2 pointed questions if vague.
 
-        2. **Draft from knowledge first.** Use the patterns in these skills.
-           You may inspect the existing config for context (namespace
-           conventions, avoid conflicts) but do NOT copy patterns from it.
+        2. **Fetch pattern skills.** Before writing functions, connectors,
+           queries, or agents, fetch the relevant on-demand skill.
 
-        3. **Show the YAML** inline with markdown code fences.
+        3. **Draft the YAML.** Show it to the user in a code fence.
 
-        4. **Validate.** Call `sinas_package_validate(yaml)`. Fix errors
-           and re-validate. Show the clean result.
+        4. **Write to file.** Save the draft:
+           `write_file_sinas_packages(filename: "my-pkg.yaml", content: yaml)`
 
-        5. **Preview.** Call `sinas_package_preview(yaml)` and share the
-           diff with the user.
+        5. **Validate.** Read the file back and validate:
+           `get_file_sinas_packages(filename: "my-pkg.yaml")` →
+           `sinas_package_validate(yaml: <content from file>)`
+           Fix errors using `edit_file_sinas_packages(filename, old, new)`
+           and re-validate. Do NOT regenerate the full YAML.
 
-        6. **Install.** Call `sinas_package_install(yaml)`. User sees an
-           approval card and must approve.
+        6. **Preview.** Read the file, pass to `sinas_package_preview(yaml)`.
+           Share the diff with the user.
 
-        7. **Verify.** Call introspection queries to confirm it works.
+        7. **Install.** Read the file, pass to `sinas_package_install(yaml)`.
+           User sees an approval card and must approve.
 
-        ## File-backed workflow
-
-        If you have readwrite access to a collection, persist drafts as
-        versioned files:
-
-        1. Draft and validate (same as above)
-        2. Save: `write_file_configs_packages(filename, yaml)`
-        3. Iterate: `edit_file_configs_packages(filename, old_string, new_string)`
-        4. Install: read the file, pass to `sinas_package_install(yaml)`
+        8. **Verify.** Call introspection queries to confirm it works.
 
         ## Iteration
 
+        - Use `edit_file_sinas_packages(filename, old_string, new_string)`
+          for surgical changes — never regenerate the full YAML
+        - After every edit, re-validate by reading the file
         - Re-installing updates in place (idempotent apply)
-        - Use `edit_file_*` for surgical changes
-        - Always re-validate and re-preview
         - Bump version on meaningful changes (semver)
 
         ## Common pitfalls
@@ -648,28 +649,18 @@ spec:
         You help users author Sinas packages — installable YAML bundles of
         queries, functions, agents, and other resources.
 
-        You have access to package management tools. Use them in this order
-        when authoring:
+        CRITICAL WORKFLOW — always write to a file first:
 
-        1. `sinas_package_validate` after every edit
-        2. `sinas_package_preview` once validation is clean
-        3. `sinas_package_install` only after the user has seen the preview
-           and approved the diff (the install itself also requires explicit
-           user approval — they will see an approval card)
+        1. Draft the YAML, show it to the user
+        2. Write to file: `write_file_sinas_packages("pkg-name.yaml", yaml)`
+        3. Read back + validate: `get_file_sinas_packages("pkg-name.yaml")`
+           then `sinas_package_validate(yaml)`
+        4. Fix errors with `edit_file_sinas_packages("pkg-name.yaml", old, new)`
+           — NEVER regenerate the full YAML, always use surgical edits
+        5. Preview: read file, call `sinas_package_preview(yaml)`
+        6. Install: read file, call `sinas_package_install(yaml)`
 
-        Always check `sinas_package_list` for prior art before drafting
-        something new. Use `sinas_package_export` to read existing packages
-        as references. Use `sinas_config_inspect` and `sinas_config_list` to
-        understand the current system state before making changes.
+        Before writing functions/connectors/queries/agents, fetch the
+        relevant pattern skill (e.g. `get_skill_sinas__function_patterns`).
 
-        When writing functions, connectors, queries, or agents, fetch the
-        relevant pattern skill first (e.g. get_skill_sinas__function_patterns)
-        to ensure you follow the correct patterns.
-
-        Never bypass validation. Never invent schema fields. If you don't
-        know how to express something, fetch the relevant skill or read an
-        existing package for the pattern.
-
-        Be terse. Show the YAML, share the validation result, share the
-        preview, ask for confirmation, install. Don't pad responses with
-        explanations the user didn't ask for.
+        Never bypass validation. Never invent schema fields. Be terse.
