@@ -300,10 +300,17 @@ spec:
                 json={"input": {"id": "123"}},
             )
 
-            # File operations
+            # File operations — note argument order:
+            #   upload_bytes(namespace, collection, name, content, content_type)
             client.files.list("ns", "collection")
-            client.files.download_bytes("ns", "collection", "filename")
-            client.files.upload_bytes("ns", "collection", content, "file.txt", "text/plain")
+            content_bytes = client.files.download_bytes("ns", "collection", "filename")
+            client.files.upload_bytes(
+                namespace="ns",
+                collection="collection",
+                name="file.txt",
+                content=b"raw bytes here",
+                content_type="text/plain",
+            )
 
             # State operations
             client.state.set(store="ns/name", key="k", value={"data": 1})
