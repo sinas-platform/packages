@@ -150,9 +150,9 @@ spec:
         ## The authoring workflow
 
         **Always write to a file first.** The file is the source of truth.
-        Never pass YAML inline to validate/preview/install — always read
-        from the file. This enables surgical edits and avoids regenerating
-        the full YAML on every change.
+        Use `file_path` on validate/preview/install — the tool reads the
+        file directly, no need to pass inline YAML. This enables surgical
+        edits and avoids wasting tokens on large inline content.
 
         1. **Clarify scope.** Ask 1-2 pointed questions if vague.
 
@@ -164,16 +164,17 @@ spec:
         4. **Write to file.** Save the draft:
            `write_file_sinas_packages(filename: "my-pkg.yaml", content: yaml)`
 
-        5. **Validate.** Read the file back and validate:
-           `get_file_sinas_packages(filename: "my-pkg.yaml")` →
-           `sinas_package_validate(yaml: <content from file>)`
+        5. **Validate from file.** Pass the file path directly:
+           `sinas_package_validate(file_path: "sinas/packages/my-pkg.yaml")`
            Fix errors using `edit_file_sinas_packages(filename, old, new)`
            and re-validate. Do NOT regenerate the full YAML.
 
-        6. **Preview.** Read the file, pass to `sinas_package_preview(yaml)`.
+        6. **Preview from file.**
+           `sinas_package_preview(file_path: "sinas/packages/my-pkg.yaml")`
            Share the diff with the user.
 
-        7. **Install.** Read the file, pass to `sinas_package_install(yaml)`.
+        7. **Install from file.**
+           `sinas_package_install(file_path: "sinas/packages/my-pkg.yaml")`
            User sees an approval card and must approve.
 
         8. **Verify.** Call introspection queries to confirm it works.
@@ -182,7 +183,7 @@ spec:
 
         - Use `edit_file_sinas_packages(filename, old_string, new_string)`
           for surgical changes — never regenerate the full YAML
-        - After every edit, re-validate by reading the file
+        - After every edit, re-validate with `file_path`
         - Re-installing updates in place (idempotent apply)
         - Bump version on meaningful changes (semver)
 
@@ -660,12 +661,11 @@ spec:
 
         1. Draft the YAML, show it to the user
         2. Write to file: `write_file_sinas_packages("pkg-name.yaml", yaml)`
-        3. Read back + validate: `get_file_sinas_packages("pkg-name.yaml")`
-           then `sinas_package_validate(yaml)`
+        3. Validate from file: `sinas_package_validate(file_path: "sinas/packages/pkg-name.yaml")`
         4. Fix errors with `edit_file_sinas_packages("pkg-name.yaml", old, new)`
            — NEVER regenerate the full YAML, always use surgical edits
-        5. Preview: read file, call `sinas_package_preview(yaml)`
-        6. Install: read file, call `sinas_package_install(yaml)`
+        5. Preview from file: `sinas_package_preview(file_path: "sinas/packages/pkg-name.yaml")`
+        6. Install from file: `sinas_package_install(file_path: "sinas/packages/pkg-name.yaml")`
 
         Before writing functions/connectors/queries/agents, fetch the
         relevant pattern skill (e.g. `get_skill_sinas__function_patterns`).
