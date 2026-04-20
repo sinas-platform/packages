@@ -1,0 +1,479 @@
+apiVersion: sinas.co/v1
+kind: SinasPackage
+package:
+  name: ddf-powerpoint
+  version: "0.5.1"
+  description: >
+    Create PowerPoint presentations from DDF YAML using the declarativedocs
+    compiler. Write DDF YAML to the collection, validate it, then compile.
+    Agents use collection file tools for token-efficient surgical edits.
+  author: Sinas
+  url: https://github.com/declarativedocs/compiler-py
+
+spec:
+  dependencies:
+    - packageName: sinas
+      version: "0.1.8"
+    - packageName: declarativedocs
+      version: "0.1.1"
+    - packageName: jsonschema
+
+  collections:
+    - namespace: ddf
+      name: presentations
+      allowSharedFiles: true
+      allowPrivateFiles: true
+      maxFileSizeMb: 50
+      maxTotalSizeGb: 5
+
+  functions:
+    - namespace: ddf
+      name: validate_ddf
+      description: >
+        Validates a DDF YAML file from the ddf/presentations collection
+        against the official DDF Presentation JSON Schema v0.1.0.
+        Returns {valid, errors, warnings}. Warnings include elements
+        that exceed canvas bounds. Call before compile_pptx.
+      sharedPool: true
+      timeout: 30
+      inputSchema:
+        type: object
+        properties:
+          filename:
+            type: string
+            description: YAML filename in the ddf/presentations collection.
+        required: [filename]
+      code: |
+        import yaml as pyyaml
+        import jsonschema
+        from sinas import SinasClient
+
+        LAYOUT_SIZES = {
+            "16x9": (10, 5.625),
+            "16x10": (10, 6.25),
+            "4x3": (10, 7.5),
+            "wide": (13.3, 7.5),
+        }
+
+        DDF_SCHEMA = {"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://ddf.dev/schemas/presentation/v0.1.0","title":"DDF Presentation","description":"Declarative Document Format — Presentation schema v0.1.0","type":"object","required":["presentation"],"additionalProperties":False,"properties":{"presentation":{"type":"object","required":["slides"],"additionalProperties":False,"properties":{"layout":{"type":"string","enum":["16x9","16x10","4x3","wide"],"default":"16x9"},"title":{"type":"string"},"author":{"type":"string"},"theme":{"$ref":"#/$defs/Theme"},"masters":{"type":"object","additionalProperties":{"$ref":"#/$defs/Master"}},"slides":{"type":"array","items":{"$ref":"#/$defs/Slide"},"minItems":1}}}},"$defs":{"HexColor":{"type":"string","pattern":"^(\\$[a-zA-Z_]\\w*|[0-9a-fA-F]{6})$","description":"6-char hex color (no #) or $theme_variable"},"Theme":{"type":"object","additionalProperties":False,"properties":{"colors":{"type":"object","additionalProperties":{"type":"string"}},"fonts":{"type":"object","additionalProperties":{"type":"string"}}}},"Master":{"type":"object","additionalProperties":False,"properties":{"background":{"oneOf":[{"type":"string"},{"$ref":"#/$defs/Background"}]},"elements":{"type":"array","items":{"$ref":"#/$defs/Element"}}}},"Background":{"type":"object","properties":{"color":{"type":"string"},"path":{"type":"string"},"transparency":{"type":"number","minimum":0,"maximum":100}}},"Slide":{"type":"object","additionalProperties":False,"properties":{"master":{"type":"string"},"data":{"type":"object","additionalProperties":{"type":"string"}},"background":{"oneOf":[{"type":"string"},{"$ref":"#/$defs/Background"}]},"notes":{"type":"string"},"elements":{"type":"array","items":{"$ref":"#/$defs/Element"}}}},"Shadow":{"oneOf":[{"type":"string","enum":["default","soft","hard","glow","up"]},{"$ref":"#/$defs/ShadowObject"}]},"ShadowObject":{"type":"object","additionalProperties":False,"properties":{"blur":{"type":"number","default":6},"offset":{"type":"number","default":2},"angle":{"type":"number","default":135},"color":{"type":"string","default":"000000"},"opacity":{"type":"number","minimum":0,"maximum":1,"default":0.15}}},"LineStyle":{"type":"object","properties":{"color":{"type":"string"},"width":{"type":"number"}}},"Run":{"type":"object","required":["text"],"properties":{"text":{"type":"string"},"font":{"type":"string"},"size":{"type":"number"},"color":{"type":"string"},"bold":{"type":"boolean"},"italic":{"type":"boolean"},"underline":{"type":"boolean"},"spaceAfter":{"type":"number"},"link":{"type":"string"}}},"BulletItem":{"type":"object","required":["text"],"properties":{"text":{"type":"string"},"font":{"type":"string"},"size":{"type":"number"},"color":{"type":"string"},"bold":{"type":"boolean"},"indent":{"type":"integer","minimum":0},"spaceAfter":{"type":"number"}}},"Series":{"type":"object","required":["name","labels","values"],"properties":{"name":{"type":"string"},"labels":{"type":"array","items":{"type":"string"}},"values":{"type":"array","items":{"type":"number"}}}},"ChartStyle":{"type":"object","properties":{"legend":{"type":"boolean"},"legendPos":{"type":"string","enum":["b","t","l","r"]},"legendSize":{"type":"number"},"dataLabels":{"type":"string","enum":["outEnd","inEnd","center"]},"dataLabelColor":{"type":"string"},"showPercent":{"type":"boolean"},"smooth":{"type":"boolean"},"lineSize":{"type":"number"},"axisColor":{"type":"string"},"gridLines":{"type":"string","enum":["subtle","none"]},"chartArea":{"type":"object"}}},"CellObject":{"type":"object","required":["text"],"properties":{"text":{"type":"string"},"font":{"type":"string"},"size":{"type":"number"},"color":{"type":"string"},"fill":{"type":"string"},"bold":{"type":"boolean"},"italic":{"type":"boolean"},"align":{"type":"string","enum":["left","center","right"]},"valign":{"type":"string","enum":["top","middle","bottom"]},"colspan":{"type":"integer"},"rowspan":{"type":"integer"}}},"CardStyle":{"type":"object","properties":{"fill":{"type":"string"},"radius":{"type":"number"},"shadow":{"$ref":"#/$defs/Shadow"},"border":{"type":"string"}}},"IconConfig":{"type":"object","properties":{"name":{"type":"string"},"bg":{"type":"string"},"color":{"type":"string","default":"FFFFFF"},"size":{"type":"number"}}},"GroupItem":{"type":"object","properties":{"runs":{"type":"array","items":{"$ref":"#/$defs/Run"}},"text":{"type":"string"},"elements":{"type":"array","items":{"$ref":"#/$defs/Element"}},"icon":{"oneOf":[{"type":"string"},{"$ref":"#/$defs/IconConfig"}]},"align":{"type":"string","enum":["left","center","right"]},"valign":{"type":"string","enum":["top","middle","bottom"]},"font":{"type":"string"},"size":{"type":"number"},"color":{"type":"string"},"bold":{"type":"boolean"}}},"Element":{"type":"object","required":["type"],"properties":{"type":{"type":"string","enum":["text","shape","image","chart","table","group","icon"]},"x":{"type":"number"},"y":{"type":"number"},"w":{"type":"number"},"h":{"type":"number"},"text":{"type":"string"},"runs":{"type":"array","items":{"$ref":"#/$defs/Run"}},"bullets":{"type":"array","items":{"oneOf":[{"type":"string"},{"$ref":"#/$defs/BulletItem"}]}},"font":{"type":"string"},"size":{"type":"number"},"color":{"type":"string"},"bold":{"type":"boolean"},"italic":{"type":"boolean"},"underline":{"type":"boolean"},"align":{"type":"string","enum":["left","center","right","justify"]},"valign":{"type":"string","enum":["top","middle","bottom"]},"margin":{"type":"number"},"lineSpacing":{"type":"number"},"spaceAfter":{"type":"number"},"spaceBefore":{"type":"number"},"rotate":{"type":"number"},"charSpacing":{"type":"number"},"shape":{"type":"string"},"fill":{"type":"string"},"line":{"$ref":"#/$defs/LineStyle"},"radius":{"type":"number"},"shadow":{"$ref":"#/$defs/Shadow"},"transparency":{"type":"number","minimum":0,"maximum":100},"path":{"type":"string"},"data":{"type":"string"},"rounding":{"type":"boolean"},"sizing":{"type":"object"},"altText":{"type":"string"},"link":{"type":"string"},"icon":{"oneOf":[{"type":"string"},{"$ref":"#/$defs/IconConfig"}]},"bg":{"type":"string"},"chart":{"type":"string","enum":["bar","line","pie","doughnut","scatter","radar"]},"series":{"type":"array","items":{"$ref":"#/$defs/Series"}},"colors":{"type":"array","items":{"type":"string"}},"direction":{"type":"string","enum":["col","bar"]},"chartTitle":{"type":"string"},"style":{"$ref":"#/$defs/ChartStyle"},"rows":{"type":"array"},"colWidths":{"type":"array","items":{"type":"number"}},"border":{"$ref":"#/$defs/LineStyle"},"autoPage":{"type":"boolean"},"layout":{"type":"string","enum":["row","grid"]},"columns":{"type":"integer","minimum":1},"gap":{"type":"number"},"card":{"$ref":"#/$defs/CardStyle"},"items":{"type":"array","items":{"$ref":"#/$defs/GroupItem"}}}}}}
+
+        def _check_bounds(pres, warnings):
+            layout = pres.get("layout", "16x9")
+            sw, sh = LAYOUT_SIZES.get(layout, (10, 5.625))
+            for si, slide in enumerate(pres.get("slides", [])):
+                for ei, el in enumerate(slide.get("elements", [])):
+                    if not isinstance(el, dict):
+                        continue
+                    x, y = el.get("x", 0), el.get("y", 0)
+                    w, h = el.get("w", 0), el.get("h", 0)
+                    etype = el.get("type", "?")
+                    if x + w > sw + 0.01:
+                        warnings.append(f"slides[{si}].elements[{ei}] ({etype}): x({x})+w({w})={x+w:.2f} exceeds width {sw}")
+                    if y + h > sh + 0.01:
+                        warnings.append(f"slides[{si}].elements[{ei}] ({etype}): y({y})+h({h})={y+h:.2f} exceeds height {sh}")
+                    if x < 0:
+                        warnings.append(f"slides[{si}].elements[{ei}] ({etype}): x({x}) is negative")
+                    if y < 0:
+                        warnings.append(f"slides[{si}].elements[{ei}] ({etype}): y({y}) is negative")
+
+        def handler(input_data, context):
+            client = SinasClient(base_url="http://host.docker.internal:8000", token=context["access_token"])
+            raw = client.files.download_bytes("ddf", "presentations", input_data["filename"])
+            if raw is None:
+                return {"valid": False, "errors": [f"File not found."], "warnings": []}
+            content = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+            try:
+                spec = pyyaml.safe_load(content)
+            except Exception as e:
+                return {"valid": False, "errors": [f"YAML parse error: {e}"], "warnings": []}
+            if not isinstance(spec, dict):
+                return {"valid": False, "errors": ["Root must be a mapping."], "warnings": []}
+            errors, warnings = [], []
+            for err in jsonschema.Draft202012Validator(DDF_SCHEMA).iter_errors(spec):
+                path = " → ".join(str(p) for p in err.absolute_path) or "(root)"
+                errors.append(f"{path}: {err.message}")
+            pres = spec.get("presentation", {})
+            if isinstance(pres, dict) and not errors:
+                _check_bounds(pres, warnings)
+            return {"valid": len(errors) == 0, "errors": errors[:20], "warnings": warnings[:20]}
+
+    - namespace: ddf
+      name: compile_pptx
+      description: >
+        Reads a DDF YAML file from the ddf/presentations collection,
+        compiles it to .pptx, and writes the result back. Pass only the filename.
+      sharedPool: true
+      timeout: 60
+      inputSchema:
+        type: object
+        properties:
+          filename:
+            type: string
+            description: YAML filename in ddf/presentations collection.
+          output_filename:
+            type: string
+            description: Output .pptx filename. Defaults to input with .pptx extension.
+        required: [filename]
+      code: |
+        import tempfile, os
+        from sinas import SinasClient
+
+        def handler(input_data, context):
+            from declarativedocs import compile as ddf_compile
+            client = SinasClient(base_url="http://host.docker.internal:8000", token=context["access_token"])
+            filename = input_data["filename"]
+            output_filename = input_data.get("output_filename")
+            if not output_filename:
+                output_filename = filename.rsplit(".", 1)[0] + ".pptx"
+            if not output_filename.endswith(".pptx"):
+                output_filename += ".pptx"
+            raw = client.files.download_bytes("ddf", "presentations", filename)
+            if raw is None:
+                return {"error": f"File '{filename}' not found in ddf/presentations."}
+            yaml_content = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                yaml_path = os.path.join(tmpdir, "input.yaml")
+                pptx_path = os.path.join(tmpdir, output_filename)
+                with open(yaml_path, "w", encoding="utf-8") as f:
+                    f.write(yaml_content)
+                try:
+                    ddf_compile(yaml_path, pptx_path)
+                except Exception as e:
+                    return {"error": f"Compilation failed: {str(e)}"}
+                with open(pptx_path, "rb") as f:
+                    pptx_bytes = f.read()
+                client.files.upload_bytes(
+                    namespace="ddf",
+                    collection="presentations",
+                    name=output_filename,
+                    content=pptx_bytes,
+                    content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    visibility="shared",
+                    update_existing=True,
+                )
+            return {"filename": output_filename, "size_bytes": len(pptx_bytes), "message": f"Compiled '{filename}' → '{output_filename}' in ddf/presentations."}
+
+  skills:
+    - namespace: ddf
+      name: presentation-author
+      description: >
+        Full DDF Presentation specification (v0.1.0). Teaches an agent
+        how to write DDF YAML that compiles to .pptx. MUST be followed
+        exactly — the compiler ignores non-standard keys.
+      content: |
+        # DDF Presentation Author — STRICT SPECIFICATION
+
+        You create PowerPoint presentations by writing DDF YAML. The compiler
+        is very literal — it ONLY renders `elements` inside each slide. Any
+        other keys (like `title`, `content`, `subtitle`, `layout` on slides)
+        are IGNORED and produce empty slides.
+
+        ## CRITICAL RULES — Read First
+
+        1. **Every slide MUST have an `elements` list** (or reference a `master`).
+           There is NO `title:`, `content:`, `subtitle:`, or `layout:` key on slides.
+        2. **Colors are 6-char hex WITHOUT # prefix**: `"1E2761"` not `"#1E2761"`
+        3. **All positioning is in inches**: `x`, `y`, `w`, `h` on every element
+        4. **Theme only has `colors` and `fonts` sub-keys** — nothing else
+        5. **One YAML key per line** — NEVER put multiple keys on one line.
+           `x: 1  y: 2` is NOT valid YAML (it becomes the string `"1  y: 2"`).
+
+        ## Canvas sizes (in inches)
+
+        | Layout  | Width | Height |
+        |---------|-------|--------|
+        | 16x9    | 10    | 5.625  |
+        | 16x10   | 10    | 6.25   |
+        | 4x3     | 10    | 7.5    |
+        | wide    | 13.3  | 7.5    |
+
+        **Default is 16x9 = 10 × 5.625 inches.** Keep all elements within
+        these bounds. With 0.5in margins: usable area is x:0.5, w:9, y:0.3, h:5.
+
+        ## WRONG — multiple keys on one line:
+        ```yaml
+        - type: text
+          x: 1  y: 2  w: 8  h: 1
+        ```
+
+        ## WRONG — produces empty slides:
+        ```yaml
+        slides:
+          - title: "Hello"
+            content: "Some text"
+        ```
+
+        ## CORRECT:
+        ```yaml
+        slides:
+          - background: $primary
+            elements:
+              - type: text
+                x: 0.5
+                y: 1.5
+                w: 9
+                h: 1.5
+                text: "Hello"
+                font: $heading
+                size: 44
+                color: $white
+                bold: true
+              - type: text
+                x: 0.5
+                y: 3.5
+                w: 9
+                h: 1
+                text: "Some text"
+                size: 20
+                color: $light
+        ```
+
+        ## Token-Efficient Workflow
+
+        1. **Write** DDF YAML: `write_file_ddf_presentations("deck.yaml", yaml)`
+        2. **Validate**: `ddf/validate_ddf({"filename": "deck.yaml"})`
+           — returns `{valid, errors, warnings}`. Warnings flag off-screen elements.
+        3. **Fix errors** surgically: `edit_file_ddf_presentations("deck.yaml", old, new)`
+        4. **Re-validate** until `{valid: true}` and no warnings
+        5. **Compile**: `ddf/compile_pptx({"filename": "deck.yaml"})`
+        6. Share download URL
+
+        Always prefer `edit_file` over rewriting the entire YAML.
+
+        ## Root Structure
+
+        ```yaml
+        presentation:
+          layout: "16x9"
+          title: "Deck Title"
+          author: "Author"
+          theme:
+            colors:
+              primary: "1E2761"
+              accent: "F96167"
+              white: "FFFFFF"
+              dark: "2D2D2D"
+              light: "F5F5F5"
+              muted: "888888"
+            fonts:
+              heading: Georgia
+              body: Calibri
+          masters: {}
+          slides: []
+        ```
+
+        ## Theme Variables
+
+        Define in `theme:`, reference with `$name`:
+        - `$primary`, `$accent` → from theme.colors
+        - `$heading`, `$body` → from theme.fonts
+        - "$4.2M" is NOT resolved ($ + digit)
+
+        ## Masters (Reusable Templates)
+
+        ```yaml
+        masters:
+          title_slide:
+            background: $primary
+            elements:
+              - type: text
+                x: 0.5
+                y: 1.8
+                w: 9
+                h: 1.5
+                text: "{{title}}"
+                font: $heading
+                size: 44
+                color: $white
+                bold: true
+                align: center
+              - type: text
+                x: 0.5
+                y: 3.5
+                w: 9
+                h: 0.8
+                text: "{{subtitle}}"
+                size: 20
+                color: $light
+                align: center
+        slides:
+          - master: title_slide
+            data:
+              title: "My Presentation"
+              subtitle: "April 2026"
+        ```
+
+        ## Slide Structure
+
+        ```yaml
+        - background: $primary
+          notes: "Speaker notes"
+          elements:
+            - type: text
+              x: 0.5
+              y: 0.3
+              w: 9
+              h: 1
+              text: "Slide title"
+              font: $heading
+              size: 36
+              color: $white
+              bold: true
+        ```
+
+        ## Element Types
+
+        Every element needs `type`, `x`, `y`, `w`, `h` (all in inches).
+        Default canvas (16x9) is 10 × 5.625 inches.
+
+        ### text
+        ```yaml
+        - type: text
+          x: 0.5
+          y: 0.5
+          w: 9
+          h: 1
+          text: "Hello"
+          font: $heading
+          size: 28
+          color: $dark
+          bold: true
+          align: center
+          valign: middle
+        ```
+
+        Runs (rich text):
+        ```yaml
+        - type: text
+          x: 0.5
+          y: 0.5
+          w: 9
+          h: 1
+          runs:
+            - text: "Bold "
+              bold: true
+              size: 24
+              color: $primary
+            - text: "normal"
+              size: 24
+        ```
+
+        Bullets:
+        ```yaml
+        - type: text
+          x: 0.5
+          y: 1.5
+          w: 9
+          h: 3.5
+          size: 18
+          font: $body
+          color: $dark
+          bullets:
+            - "Point one"
+            - text: "Sub-point"
+              indent: 1
+            - text: "Emphasized"
+              bold: true
+              color: $accent
+        ```
+
+        ### shape
+        ```yaml
+        - type: shape
+          shape: rounded_rectangle
+          x: 0.25
+          y: 0.25
+          w: 9.5
+          h: 5.125
+          fill: $primary
+          radius: 0.15
+          shadow: soft
+        ```
+
+        ### chart
+        ```yaml
+        - type: chart
+          chart: bar
+          x: 0.5
+          y: 1
+          w: 9
+          h: 4
+          series:
+            - name: "Revenue"
+              labels: ["Q1", "Q2", "Q3", "Q4"]
+              values: [120, 150, 180, 210]
+          colors: [$primary, $accent]
+          style:
+            legend: true
+            legendPos: b
+            dataLabels: outEnd
+        ```
+
+        ### table
+        ```yaml
+        - type: table
+          x: 0.5
+          y: 1.5
+          w: 9
+          h: 3.5
+          rows:
+            - - text: "Metric"
+                fill: $primary
+                color: $white
+                bold: true
+              - text: "Value"
+                fill: $primary
+                color: $white
+                bold: true
+            - ["Revenue", "$4.2M"]
+            - ["Growth", "+18%"]
+          colWidths: [5, 4]
+        ```
+
+        ### group (auto-layout cards)
+        ```yaml
+        - type: group
+          x: 0.5
+          y: 1.5
+          w: 9
+          h: 3.5
+          layout: row
+          columns: 3
+          gap: 0.3
+          card:
+            fill: $white
+            radius: 0.15
+            shadow: soft
+            border: $light
+          items:
+            - icon:
+                name: "📊"
+                bg: $primary
+              runs:
+                - text: "Title"
+                  bold: true
+                  size: 16
+                - text: "Detail"
+                  size: 12
+                  color: $muted
+        ```
+
+        ### icon
+        ```yaml
+        - type: icon
+          x: 1
+          y: 1
+          icon: "🎯"
+          bg: $accent
+          color: $white
+          size: 0.6
+        ```
+
+        ## Checklist before writing YAML
+        - [ ] Every slide has `elements:` (not `title:`/`content:`)
+        - [ ] ONE key per line (never `x: 1  y: 2` on same line)
+        - [ ] Colors: 6-char hex, NO # prefix
+        - [ ] Theme: only `colors` and `fonts`
+        - [ ] One of text/runs/bullets per text element
+        - [ ] All elements within canvas (10 × 5.625 for 16x9)
+        - [ ] x + w ≤ 10, y + h ≤ 5.625 for default layout

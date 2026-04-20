@@ -30,6 +30,7 @@ Install the sinas/package-author package
 | Package | Description |
 |---|---|
 | [sinas-package-author](packages/sinas-package-author/) | Skill + reference agent for authoring Sinas packages. Gives an agent the ability to draft, validate, preview, and install packages. |
+| [ddf-powerpoint](packages/ddf-powerpoint/) | Create PowerPoint presentations from DDF YAML. Includes validator, compiler, and the full DDF specification as a skill. |
 
 ## Package structure
 
