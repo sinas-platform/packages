@@ -2,7 +2,7 @@ apiVersion: sinas.co/v1
 kind: SinasPackage
 package:
   name: sinas-package-author
-  version: "0.2.0"
+  version: "0.3.0"
   description: >
     Skills + reference agent for authoring Sinas Packages. Split into focused
     skills: schema/workflow (preloaded), plus on-demand patterns for functions,
@@ -96,6 +96,7 @@ spec:
           author: Your Name
           url: https://github.com/your/repo
         spec:
+          variables: []       # install-time configuration (optional)
           collections: []
           queries: []
           functions: []
@@ -113,6 +114,64 @@ spec:
         ```
 
         All sections are optional. Include only what you need.
+
+        ## Install-time variables
+
+        Packages can declare typed variables that are prompted during install.
+        Use `${{ vars.NAME }}` in the spec — substituted before persistence.
+        NOT Jinja2, so no conflict with system prompt templates.
+
+        ```yaml
+        spec:
+          variables:
+            - name: SERVICE_URL
+              type: text
+              description: Base URL of the external service
+              example: http://host.docker.internal:8080
+              required: true
+
+            - name: PRIMARY_LLM
+              type: resource_ref
+              resource: llm_providers
+              description: LLM provider for main agents
+              required: true
+
+            - name: API_KEY
+              type: secret
+              description: External API key (stored encrypted)
+              required: true
+
+            - name: MODE
+              type: enum
+              choices: [fast, balanced, thorough]
+              default: balanced
+
+            - name: VERBOSE
+              type: boolean
+              default: false
+
+          connectors:
+            - baseUrl: "${{ vars.SERVICE_URL }}"
+
+          agents:
+            - llmProviderName: "${{ vars.PRIMARY_LLM }}"
+              systemPrompt: |
+                Verbose mode: ${{ vars.VERBOSE }}
+        ```
+
+        **Variable types:** `text` (with optional `pattern` regex), `boolean`,
+        `enum` (with `choices`), `resource_ref` (with `resource:
+        llm_providers|database_connections|collections|secrets|roles`),
+        `secret` (creates/upserts encrypted Secret).
+
+        **Names** must be UPPER_SNAKE_CASE.
+
+        **Secrets** are not re-prompted on upgrade if they already exist.
+        Values are stored masked (`***`) in the package record.
+
+        When previewing, the response includes `variables` and
+        `requires_input`. Pass variable values when calling
+        `sinas_package_install(file_path: ..., variables: {NAME: value})`.
 
         ## What packages CAN create
 
