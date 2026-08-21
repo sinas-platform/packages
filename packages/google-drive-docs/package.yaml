@@ -1,0 +1,483 @@
+apiVersion: sinas.co/v1
+kind: SinasPackage
+package:
+  name: google-drive-docs
+  version: "0.1.0"
+  description: >
+    Google Drive & Docs integration: Drive v3 and Docs v1 connectors with
+    per-user OAuth, search-syntax and Docs-editing skills, and a librarian
+    agent that finds, reads, creates, and edits documents.
+  author: Sinas
+  url: https://github.com/sinas-platform/sinas-packages
+
+spec:
+  # ─────────────────────────────────────────────
+  # Install-time variables
+  # ─────────────────────────────────────────────
+  variables:
+    - name: GDRIVE_CLIENT_ID
+      type: text
+      description: >
+        OAuth client ID of your Google Cloud project (may be the same one
+        used for the google-calendar and gmail packages).
+      required: true
+
+    - name: GDRIVE_CLIENT_SECRET
+      type: secret
+      description: >
+        OAuth client secret. Same value as the other Google packages is
+        fine; the name is package-scoped.
+      required: true
+
+  # ─────────────────────────────────────────────
+  # Connectors
+  # ─────────────────────────────────────────────
+  connectors:
+    - namespace: gdrive
+      name: drive-api
+      description: >
+        Google Drive API v3: search, file metadata, Docs export to text,
+        copy, folders, rename/trash, permissions, revisions, comments.
+      baseUrl: https://www.googleapis.com/drive/v3
+      auth:
+        type: oauth2_authorization_code
+        authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth?access_type=offline&prompt=consent"
+        tokenUrl: https://oauth2.googleapis.com/token
+        clientId: "${{ vars.GDRIVE_CLIENT_ID }}"
+        secret: "{{GDRIVE_CLIENT_SECRET}}"
+        scopes:
+          - https://www.googleapis.com/auth/drive
+      headers:
+        Accept: application/json
+      retry:
+        maxAttempts: 3
+        backoff: exponential
+      timeoutSeconds: 30
+      operations:
+        - name: search-files
+          method: GET
+          path: /files
+          description: >
+            Search files and folders with Drive query syntax (q). Fetch the
+            gdrive/search-syntax skill for the operator language.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties:
+              q:
+                type: string
+                description: "Drive query, e.g. name contains 'report' and mimeType = 'application/vnd.google-apps.document'."
+              fields:
+                type: string
+                description: 'Response shaping, e.g. "files(id,name,mimeType,modifiedTime,owners,parents),nextPageToken".'
+              orderBy:
+                type: string
+                description: 'e.g. "modifiedTime desc".'
+              pageSize:
+                type: integer
+              pageToken:
+                type: string
+              includeItemsFromAllDrives:
+                type: boolean
+              supportsAllDrives:
+                type: boolean
+            required: [q]
+
+        - name: get-file
+          method: GET
+          path: /files/{{ fileId }}
+          description: Get file metadata (name, mimeType, parents, owners, webViewLink, size).
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              fileId:
+                type: string
+              fields:
+                type: string
+                description: 'e.g. "id,name,mimeType,parents,webViewLink,modifiedTime,size".'
+              supportsAllDrives:
+                type: boolean
+            required: [fileId]
+
+        - name: export-file
+          method: GET
+          path: /files/{{ fileId }}/export
+          description: >
+            Export a Google Doc/Sheet/Slides file as text. Use
+            mimeType=text/markdown for Docs (or text/plain; text/csv for a
+            Sheet's first tab). Returns the raw text content.
+          requestBodyMapping: path_and_query
+          responseMapping: text
+          parameters:
+            type: object
+            properties:
+              fileId:
+                type: string
+              mimeType:
+                type: string
+                description: '"text/markdown", "text/plain", or "text/csv".'
+            required: [fileId, mimeType]
+
+        - name: copy-file
+          method: POST
+          path: /files/{{ fileId }}/copy
+          description: Copy a file (the way to create a doc from a template).
+          requestBodyMapping: path_and_json
+          parameters:
+            type: object
+            properties:
+              fileId:
+                type: string
+              name:
+                type: string
+                description: Name of the copy.
+              parents:
+                type: array
+                items: { type: string }
+                description: Folder id(s) to place the copy in.
+            required: [fileId]
+
+        - name: create-folder
+          method: POST
+          path: /files
+          description: Create a folder (or an empty file by other mimeType).
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              name:
+                type: string
+              mimeType:
+                type: string
+                description: 'Use "application/vnd.google-apps.folder" for folders.'
+              parents:
+                type: array
+                items: { type: string }
+            required: [name, mimeType]
+
+        - name: update-file-metadata
+          method: PATCH
+          path: /files/{{ fileId }}
+          description: Rename a file or move it to/from trash (trashed true/false).
+          requestBodyMapping: path_and_json
+          parameters:
+            type: object
+            properties:
+              fileId:
+                type: string
+              name:
+                type: string
+              trashed:
+                type: boolean
+              description:
+                type: string
+            required: [fileId]
+
+        - name: list-permissions
+          method: GET
+          path: /files/{{ fileId }}/permissions
+          description: List who has access to a file and with which role.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              fileId:
+                type: string
+              fields:
+                type: string
+                description: 'e.g. "permissions(id,type,role,emailAddress)".'
+              supportsAllDrives:
+                type: boolean
+            required: [fileId]
+
+        - name: share-file
+          method: POST
+          path: /files/{{ fileId }}/permissions
+          description: >
+            Grant access to a file (sends a notification email by default).
+            role: reader/commenter/writer; type: user/group/domain/anyone.
+          requestBodyMapping: path_and_json
+          parameters:
+            type: object
+            properties:
+              fileId:
+                type: string
+              role:
+                type: string
+                description: '"reader", "commenter", or "writer".'
+              type:
+                type: string
+                description: '"user", "group", "domain", or "anyone".'
+              emailAddress:
+                type: string
+                description: Required for type user/group.
+            required: [fileId, role, type]
+
+        - name: list-revisions
+          method: GET
+          path: /files/{{ fileId }}/revisions
+          description: List revisions of a file (id, modifiedTime, lastModifyingUser).
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              fileId:
+                type: string
+              pageSize:
+                type: integer
+            required: [fileId]
+
+        - name: list-comments
+          method: GET
+          path: /files/{{ fileId }}/comments
+          description: List comments on a file (the fields parameter is required by this endpoint).
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              fileId:
+                type: string
+              fields:
+                type: string
+                description: 'Required, e.g. "comments(id,content,author,resolved,quotedFileContent)".'
+              pageSize:
+                type: integer
+            required: [fileId, fields]
+
+    - namespace: gdrive
+      name: docs-api
+      description: >
+        Google Docs API v1: read document structure, create documents, and
+        edit via batchUpdate requests.
+      baseUrl: https://docs.googleapis.com/v1
+      auth:
+        type: oauth2_authorization_code
+        authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth?access_type=offline&prompt=consent"
+        tokenUrl: https://oauth2.googleapis.com/token
+        clientId: "${{ vars.GDRIVE_CLIENT_ID }}"
+        secret: "{{GDRIVE_CLIENT_SECRET}}"
+        scopes:
+          - https://www.googleapis.com/auth/drive
+      headers:
+        Accept: application/json
+      retry:
+        maxAttempts: 3
+        backoff: exponential
+      timeoutSeconds: 30
+      operations:
+        - name: get-document
+          method: GET
+          path: /documents/{{ documentId }}
+          description: >
+            Get a document's full structured body (elements with indexes).
+            For plain reading prefer drive-api export-file — it is far
+            smaller; use this only when you need indexes for batch-update.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              documentId:
+                type: string
+            required: [documentId]
+
+        - name: create-document
+          method: POST
+          path: /documents
+          description: Create an empty document with a title (in My Drive root; move via Drive if needed).
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              title:
+                type: string
+            required: [title]
+
+        - name: batch-update
+          method: POST
+          path: /documents/{{ documentId }}:batchUpdate
+          description: >
+            Apply edit requests to a document. Fetch the
+            gdrive/docs-editing skill first — prefer replaceAllText;
+            index-based inserts are error-prone.
+          requestBodyMapping: path_and_json
+          parameters:
+            type: object
+            properties:
+              documentId:
+                type: string
+              requests:
+                type: array
+                items: { type: object }
+                description: 'Docs API request objects, e.g. [{"replaceAllText": {...}}].'
+            required: [documentId, requests]
+
+  # ─────────────────────────────────────────────
+  # Skills
+  # ─────────────────────────────────────────────
+  skills:
+    - namespace: gdrive
+      name: search-syntax
+      description: >
+        Google Drive search query syntax (q parameter): operators, mimeTypes,
+        folder scoping, and recipes.
+      content: |
+        # Drive Search Syntax (q)
+
+        Clauses combine with `and` / `or`, negate with `not`. String values
+        in single quotes.
+
+        ## Operators
+
+        - name contains 'report' — name match (prefix-ish word matching)
+        - fullText contains 'liability clause' — content search
+        - mimeType = 'application/vnd.google-apps.document'
+        - '1AbC...folderId' in parents — items inside a folder
+        - modifiedTime > '2026-07-01T00:00:00' — ISO timestamps
+        - starred = true, trashed = false  (ALWAYS add trashed = false)
+        - 'sam@company.com' in owners / in writers / in readers
+        - sharedWithMe = true
+
+        ## Common mimeTypes
+
+        - Google Doc:    application/vnd.google-apps.document
+        - Google Sheet:  application/vnd.google-apps.spreadsheet
+        - Google Slides: application/vnd.google-apps.presentation
+        - Folder:        application/vnd.google-apps.folder
+        - PDF:           application/pdf
+
+        ## Recipes
+
+        Recent docs:
+          mimeType = 'application/vnd.google-apps.document' and
+          trashed = false — with orderBy=modifiedTime desc
+
+        In a folder, by name:
+          '<folderId>' in parents and name contains 'invoice' and trashed = false
+
+        Content search across shared drives:
+          fullText contains 'renewal terms' and trashed = false
+          — with includeItemsFromAllDrives=true and supportsAllDrives=true
+
+        ## Tips
+
+        - Resolve folder names to ids first (search the folder mimeType by
+          name), then use `in parents`.
+        - Always request explicit fields, e.g.
+          fields=files(id,name,mimeType,modifiedTime,webViewLink),nextPageToken
+          — the default response is bloated.
+
+    - namespace: gdrive
+      name: docs-editing
+      description: >
+        Google Docs batchUpdate patterns: replaceAllText-first strategy,
+        insert requests, and index pitfalls.
+      content: |
+        # Docs Editing (batchUpdate)
+
+        ## Strategy: replaceAllText first
+
+        The Docs API edits by character index, and every edit shifts later
+        indexes — fragile for generated edits. Prefer this order:
+
+        1. **Template flow (most robust)**: copy a template doc via Drive
+           copy-file, then fill placeholders:
+           ```json
+           { "replaceAllText": {
+               "containsText": { "text": "{{client_name}}", "matchCase": true },
+               "replaceText": "Acme B.V." } }
+           ```
+        2. **Append to end**: insert at the document end using
+           endOfSegmentLocation:
+           ```json
+           { "insertText": {
+               "endOfSegmentLocation": { "segmentId": "" },
+               "text": "\nNew section text" } }
+           ```
+        3. **Index-based edits (last resort)**: read get-document, compute
+           indexes, and put MULTIPLE edits in ONE batchUpdate ordered from
+           HIGHEST index to LOWEST so earlier edits don't shift later ones.
+
+        ## Other useful requests
+
+        Styled heading (apply after inserting its text):
+        ```json
+        { "updateParagraphStyle": {
+            "range": { "startIndex": 1, "endIndex": 20 },
+            "paragraphStyle": { "namedStyleType": "HEADING_1" },
+            "fields": "namedStyleType" } }
+        ```
+        namedStyleType: NORMAL_TEXT, TITLE, HEADING_1 ... HEADING_6.
+
+        ## Pitfalls
+
+        - A new document's body starts at index 1 (index 0 is reserved).
+        - replaceAllText replaces in headers/footers too.
+        - Reading: use Drive export-file (text/markdown) for content;
+          get-document's structured body is huge and only needed for
+          index math.
+
+  # ─────────────────────────────────────────────
+  # Agents
+  # ─────────────────────────────────────────────
+  agents:
+    - namespace: gdrive
+      name: librarian
+      description: >
+        Drive & Docs assistant: find and read documents, summarize, create
+        docs from templates, edit via replaceAllText, organize folders, and
+        manage sharing.
+      temperature: 0.2
+      enabledConnectors:
+        - connector: gdrive/drive-api
+          operations:
+            - search-files
+            - get-file
+            - export-file
+            - copy-file
+            - create-folder
+            - update-file-metadata
+            - list-permissions
+            - share-file
+            - list-revisions
+            - list-comments
+        - connector: gdrive/docs-api
+          operations:
+            - get-document
+            - create-document
+            - batch-update
+      enabledSkills:
+        - skill: gdrive/search-syntax
+          preload: false
+        - skill: gdrive/docs-editing
+          preload: false
+      systemPrompt: |
+        You are a Drive & Docs assistant working on the user's Google Drive.
+
+        Finding and reading:
+        - Search with search-files; fetch the gdrive/search-syntax skill
+          for the q syntax. Always add trashed = false and request
+          explicit fields to keep responses small.
+        - To read a Google Doc, use export-file with mimeType
+          text/markdown (fall back to text/plain). Only use get-document
+          when you need structural indexes for editing.
+        - When referencing files, include their webViewLink so the user
+          can click through.
+
+        Creating and editing:
+        - New doc from a template: copy-file the template, then
+          batch-update with replaceAllText for the placeholders. Fetch
+          the gdrive/docs-editing skill before any batch-update.
+        - Confirm with the user before edits, renames, trashing, and
+          anything touching more than one file.
+
+        Sharing:
+        - list-permissions to answer "who can see this".
+        - share-file only after explicitly confirming recipient, role,
+          and file with the user — sharing sends notification emails.
+          Never share with type "anyone" unless the user says so
+          verbatim.
+
+        Limits:
+        - You cannot upload binary files or export to PDF; say so if
+          asked (text export and doc creation/editing are supported).

@@ -1,0 +1,474 @@
+apiVersion: sinas.co/v1
+kind: SinasPackage
+package:
+  name: slack
+  version: "0.1.0"
+  description: >
+    Slack integration: Web API connector (bot token), mrkdwn formatting
+    skill, and an assistant agent that posts, reads, and summarizes
+    conversations. Inbound events arrive in a later version (pending
+    platform webhook features).
+  author: Sinas
+  url: https://github.com/sinas-platform/sinas-packages
+
+spec:
+  # ─────────────────────────────────────────────
+  # Install-time variables
+  # ─────────────────────────────────────────────
+  variables:
+    - name: SLACK_BOT_TOKEN
+      type: secret
+      description: >
+        Bot User OAuth Token (xoxb-...) from your Slack app's
+        "OAuth & Permissions" page after installing it to the workspace.
+      required: true
+
+    - name: SINAS_INTERNAL_URL
+      type: text
+      description: >
+        Base URL where function containers reach the Sinas API (used by the
+        Slack event handler to enqueue processing and invoke the agent).
+      default: http://host.docker.internal:8000
+      required: true
+
+  # ─────────────────────────────────────────────
+  # Connector
+  # ─────────────────────────────────────────────
+  connectors:
+    - namespace: slack
+      name: web-api
+      description: >
+        Slack Web API (bot token): post and update messages, read channel
+        history and threads, users, reactions, DMs.
+      baseUrl: https://slack.com/api
+      auth:
+        type: bearer
+        secret: "{{SLACK_BOT_TOKEN}}"
+      headers:
+        Content-Type: application/json; charset=utf-8
+      retry:
+        maxAttempts: 3
+        backoff: exponential
+      timeoutSeconds: 30
+      operations:
+        - name: post-message
+          method: POST
+          path: /chat.postMessage
+          description: >
+            Post a message to a channel or DM. Use thread_ts to reply in a
+            thread. Text uses Slack mrkdwn (fetch the slack/formatting
+            skill — it is NOT standard markdown).
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              channel:
+                type: string
+                description: Channel id (C...), DM id (D...), or user id (U...) for a DM.
+              text:
+                type: string
+                description: Message text in Slack mrkdwn.
+              thread_ts:
+                type: string
+                description: ts of the parent message to reply in its thread.
+              unfurl_links:
+                type: boolean
+            required: [channel, text]
+
+        - name: update-message
+          method: POST
+          path: /chat.update
+          description: Edit a message previously posted by this bot.
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              channel:
+                type: string
+              ts:
+                type: string
+                description: Timestamp id of the message to edit.
+              text:
+                type: string
+            required: [channel, ts, text]
+
+        - name: get-permalink
+          method: GET
+          path: /chat.getPermalink
+          description: Get a permanent URL for a message (for referencing it elsewhere).
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties:
+              channel:
+                type: string
+              message_ts:
+                type: string
+            required: [channel, message_ts]
+
+        - name: list-conversations
+          method: GET
+          path: /conversations.list
+          description: List channels visible to the bot — the way to resolve a channel name to its id.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties:
+              types:
+                type: string
+                description: 'Comma-separated: "public_channel,private_channel,im,mpim".'
+              exclude_archived:
+                type: boolean
+              limit:
+                type: integer
+                description: Up to 200 recommended.
+              cursor:
+                type: string
+                description: next_cursor from a previous response.
+
+        - name: join-channel
+          method: POST
+          path: /conversations.join
+          description: Join a public channel (required before reading history of channels the bot is not in).
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              channel:
+                type: string
+            required: [channel]
+
+        - name: get-history
+          method: GET
+          path: /conversations.history
+          description: >
+            Read recent messages of a channel (newest first). Thread replies
+            are NOT included — fetch them per parent with get-replies.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties:
+              channel:
+                type: string
+              limit:
+                type: integer
+                description: Keep to 20-50 for summaries.
+              cursor:
+                type: string
+              oldest:
+                type: string
+                description: Unix timestamp lower bound.
+              latest:
+                type: string
+                description: Unix timestamp upper bound.
+            required: [channel]
+
+        - name: get-replies
+          method: GET
+          path: /conversations.replies
+          description: Read a thread — all replies under a parent message ts.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties:
+              channel:
+                type: string
+              ts:
+                type: string
+                description: ts of the thread's parent message.
+              limit:
+                type: integer
+              cursor:
+                type: string
+            required: [channel, ts]
+
+        - name: open-dm
+          method: POST
+          path: /conversations.open
+          description: Open (or fetch) a DM with one or more users; returns the channel id to post to.
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              users:
+                type: string
+                description: Comma-separated user ids, e.g. "U123,U456".
+            required: [users]
+
+        - name: get-user-info
+          method: GET
+          path: /users.info
+          description: Get a user's profile (real name, display name, tz) by user id.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties:
+              user:
+                type: string
+            required: [user]
+
+        - name: list-users
+          method: GET
+          path: /users.list
+          description: List workspace users — the way to resolve a person's name to their user id.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties:
+              limit:
+                type: integer
+              cursor:
+                type: string
+
+        - name: add-reaction
+          method: POST
+          path: /reactions.add
+          description: Add an emoji reaction to a message.
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              channel:
+                type: string
+              timestamp:
+                type: string
+                description: ts of the message to react to.
+              name:
+                type: string
+                description: Emoji name without colons, e.g. "white_check_mark".
+            required: [channel, timestamp, name]
+
+  # ─────────────────────────────────────────────
+  # Functions (inbound events)
+  # ─────────────────────────────────────────────
+  functions:
+    - namespace: slack
+      name: events_handler
+      description: >
+        Fast receiver for the Slack Events API: answers the
+        url_verification challenge, filters bot/self and irrelevant
+        events, and enqueues slack/process_event. Must stay fast —
+        Slack expects a response within 3 seconds.
+      sharedPool: true
+      timeout: 10
+      inputSchema:
+        type: object
+      code: |
+        def handler(input_data, context):
+            # One-time URL verification handshake (requires responseMode: raw)
+            if input_data.get("type") == "url_verification":
+                return {"challenge": input_data.get("challenge")}
+
+            if input_data.get("type") != "event_callback":
+                return {"ok": True}
+
+            event = input_data.get("event") or {}
+
+            # Loop prevention: never react to bot messages (incl. our own)
+            # or message edits/joins (subtypes).
+            if event.get("bot_id") or event.get("subtype"):
+                return {"ok": True, "skipped": "bot_or_subtype"}
+
+            etype = event.get("type")
+            is_mention = etype == "app_mention"
+            is_dm = etype == "message" and event.get("channel_type") == "im"
+            if not (is_mention or is_dm):
+                return {"ok": True, "skipped": "irrelevant_event"}
+
+            from sinas import SinasClient
+            client = SinasClient(
+                base_url="${{ vars.SINAS_INTERNAL_URL }}",
+                token=context["access_token"],
+            )
+            client.functions.enqueue(
+                "slack", "process_event",
+                input={"event": event},
+                trigger_id=input_data.get("event_id"),
+            )
+            return {"ok": True}
+
+    - namespace: slack
+      name: process_event
+      description: >
+        Async processor for inbound Slack events: invokes the
+        slack/assistant agent (one conversation per channel+thread) and
+        posts its reply back to the thread.
+      sharedPool: true
+      timeout: 300
+      inputSchema:
+        type: object
+        properties:
+          event:
+            type: object
+        required: [event]
+      code: |
+        def handler(input_data, context):
+            import requests
+
+            event = input_data["event"]
+            channel = event.get("channel")
+            thread_ts = event.get("thread_ts") or event.get("ts")
+            user = event.get("user", "unknown")
+            text = event.get("text", "")
+
+            from sinas import SinasClient
+            client = SinasClient(
+                base_url="${{ vars.SINAS_INTERNAL_URL }}",
+                token=context["access_token"],
+            )
+
+            result = client.chats.invoke(
+                "slack", "assistant",
+                message=(
+                    f"[Inbound Slack message from <@{user}> in <#{channel}>, "
+                    f"thread {thread_ts}]\n{text}"
+                ),
+                session_key=f"slack-{channel}-{thread_ts}",
+            )
+
+            reply = (result or {}).get("reply") or ""
+            if reply:
+                resp = requests.post(
+                    "https://slack.com/api/chat.postMessage",
+                    headers={
+                        "Authorization": f"Bearer {context['secrets']['SLACK_BOT_TOKEN']}",
+                        "Content-Type": "application/json; charset=utf-8",
+                    },
+                    json={"channel": channel, "text": reply, "thread_ts": thread_ts},
+                    timeout=30,
+                )
+                posted = resp.json()
+                if not posted.get("ok"):
+                    return {"ok": False, "slack_error": posted.get("error")}
+            return {"ok": True, "chat_id": (result or {}).get("chat_id")}
+
+  # ─────────────────────────────────────────────
+  # Webhook (inbound: set as the Events API Request URL in the Slack app)
+  # ─────────────────────────────────────────────
+  webhooks:
+    - path: slack/events
+      functionName: slack/events_handler
+      description: >
+        Slack Events API endpoint. responseMode raw lets the handler echo
+        the url_verification challenge at the top level of the body;
+        dedup on event_id absorbs Slack's retries.
+      httpMethod: POST
+      requiresAuth: false
+      responseMode: raw
+      dedup:
+        key: "$.event_id"
+        ttlSeconds: 3600
+
+  # ─────────────────────────────────────────────
+  # Skills
+  # ─────────────────────────────────────────────
+  skills:
+    - namespace: slack
+      name: formatting
+      description: >
+        Slack mrkdwn syntax (NOT standard markdown), mentions, links,
+        threading semantics, and Web API response conventions.
+      content: |
+        # Slack Formatting & API Conventions
+
+        ## mrkdwn is NOT markdown
+
+        - *bold* — SINGLE asterisks (markdown ** does not work)
+        - _italic_ — underscores
+        - ~strikethrough~
+        - `inline code` and ```code blocks``` work as usual
+        - > blockquote works
+        - NO headers (#), NO tables, NO markdown links [text](url)
+        - Links: <https://example.com|link text>
+        - Line breaks: literal newlines
+        - Lists: plain "- " or "• " lines (no markdown list rendering)
+
+        ## Mentions & references
+
+        - User: <@U12345> (needs the user ID, not the name — resolve via
+          list-users / get-user-info)
+        - Channel: <#C12345>
+        - @here / @channel: <!here> / <!channel> — use sparingly
+
+        ## Threading
+
+        - Every message has a `ts` (e.g. "1721895000.123456") — it is the
+          message ID.
+        - Reply in a thread by passing the PARENT's ts as thread_ts.
+        - Replying to a reply: still use the parent's ts (thread_ts of the
+          reply you saw), not the reply's own ts.
+
+        ## API conventions
+
+        - Slack returns HTTP 200 even on failure — ALWAYS check "ok" in
+          the response; if false, "error" has the reason (e.g.
+          "not_in_channel" → join-channel first; "channel_not_found" →
+          resolve the id via list-conversations).
+        - Channel names in user requests ("#general") must be resolved to
+          ids (C...) via list-conversations before any other call.
+        - Timestamps: oldest/latest are Unix seconds; message ts values
+          are strings and must be passed back verbatim.
+
+  # ─────────────────────────────────────────────
+  # Agents
+  # ─────────────────────────────────────────────
+  agents:
+    - namespace: slack
+      name: assistant
+      description: >
+        Slack assistant: post messages and thread replies, read and
+        summarize channels and threads, DM users, react.
+      temperature: 0.2
+      enabledConnectors:
+        - connector: slack/web-api
+          operations:
+            - post-message
+            - update-message
+            - get-permalink
+            - list-conversations
+            - join-channel
+            - get-history
+            - get-replies
+            - open-dm
+            - get-user-info
+            - list-users
+            - add-reaction
+      enabledSkills:
+        - skill: slack/formatting
+          preload: true
+      systemPrompt: |
+        You are a Slack assistant operating a bot in the user's workspace.
+
+        Resolving references:
+        - Channel names ("#general") → resolve to the channel id via
+          list-conversations before any other call. People's names →
+          user ids via list-users. Cache what you resolve within the
+          conversation.
+        - If a read fails with not_in_channel, join-channel (public
+          channels only) and retry once.
+
+        Reading:
+        - Summarize channels from get-history (limit 20-50); fetch
+          get-replies for threads that matter. Attribute points to people
+          by display name, not user id.
+
+        Writing:
+        - Compose in Slack mrkdwn per the formatting skill — never
+          markdown headers, ** bold, or [text](url) links.
+        - Show the user the exact message text and target channel before
+          posting. Reply in threads (thread_ts) when responding to an
+          existing message.
+        - For DMs: open-dm first, then post to the returned channel id.
+
+        Always check "ok" in responses; on ok=false, explain the error
+        and adapt rather than retrying blindly.
+
+        Inbound messages:
+        - A message starting with "[Inbound Slack message from ...]" is a
+          workspace member mentioning or DM-ing the bot. Your final reply
+          text is posted back into that thread AUTOMATICALLY — do NOT
+          call post-message for the direct answer, and skip the
+          show-before-posting rule for it. Keep these replies short and
+          in mrkdwn. You may still use your read tools (history, replies,
+          user info) to answer well, and post-message only for messages
+          to OTHER channels the reply asks for.
