@@ -35,8 +35,9 @@ Install the sinas/package-author package
 | [google-calendar](packages/google-calendar/) | Google Calendar with per-user OAuth: Calendar v3 connector, event-format skill, and a scheduling agent. |
 | [gmail](packages/gmail/) | Gmail with per-user OAuth: search/triage/labels/drafts connector, query + MIME skills, and an inbox assistant. |
 | [google-drive-docs](packages/google-drive-docs/) | Drive & Docs with per-user OAuth: search and markdown export, template-based doc creation and editing, librarian agent. |
-| [slack](packages/slack/) | Slack Web API via bot token: post/thread/summarize/DM, mrkdwn skill, assistant agent, and inbound events (mentions/DMs → threaded agent replies). |
+| [slack](packages/slack/) | ⚠️ Experimental/parked. Slack Web API via bot token incl. inbound events — works, but relies on handler functions until webhook filters/handshake support land. |
 | [telegram](packages/telegram/) | Telegram Bot API: notifications, formatted reports, and fully declarative inbound chat (message the bot → agent replies, per-chat memory). |
+| [github](packages/github/) | GitHub REST API: issues, PRs with diffs, CI runs, code search, notifications, and a declarative issues/PRs/comments webhook. |
 
 ## Package structure
 

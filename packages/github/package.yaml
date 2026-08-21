@@ -1,0 +1,529 @@
+apiVersion: sinas.co/v1
+kind: SinasPackage
+package:
+  name: github
+  version: "0.1.0"
+  description: >
+    GitHub integration: REST API connector (issues, pull requests, Actions,
+    code and file access, notifications), search-syntax skill, an assistant
+    agent, and a declarative inbound webhook for repository events.
+  author: Sinas
+  url: https://github.com/sinas-platform/sinas-packages
+
+spec:
+  # ─────────────────────────────────────────────
+  # Install-time variables
+  # ─────────────────────────────────────────────
+  variables:
+    - name: GITHUB_TOKEN
+      type: secret
+      description: >
+        GitHub token: a fine-grained PAT (recommended; grant the repos you
+        want with Issues/Pull requests/Contents/Actions read-write as
+        needed) or a classic PAT with repo scope.
+      required: true
+
+  # ─────────────────────────────────────────────
+  # Connector
+  # ─────────────────────────────────────────────
+  connectors:
+    - namespace: github
+      name: rest-api
+      description: >
+        GitHub REST API: issues, pull requests, Actions runs, code search,
+        file contents, and notifications.
+      baseUrl: https://api.github.com
+      auth:
+        type: bearer
+        secret: "{{GITHUB_TOKEN}}"
+      headers:
+        Accept: application/vnd.github+json
+        X-GitHub-Api-Version: "2022-11-28"
+        User-Agent: sinas-connector
+      retry:
+        maxAttempts: 3
+        backoff: exponential
+      timeoutSeconds: 30
+      operations:
+        - name: get-me
+          method: GET
+          path: /user
+          description: Get the authenticated user (login, name) — also a token/connectivity check.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties: {}
+
+        # ── Issues ──
+        - name: list-issues
+          method: GET
+          path: /repos/{{ owner }}/{{ repo }}/issues
+          description: >
+            List issues in a repo. NOTE: GitHub includes pull requests in
+            this list (they carry a pull_request key) — filter them out
+            when the user asks for issues only.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              owner:
+                type: string
+              repo:
+                type: string
+              state:
+                type: string
+                description: '"open" (default), "closed", or "all".'
+              labels:
+                type: string
+                description: Comma-separated label names.
+              assignee:
+                type: string
+                description: Username, "none", or "*".
+              since:
+                type: string
+                description: ISO 8601 — only issues updated after this time.
+              per_page:
+                type: integer
+                description: Keep to 10-30.
+              page:
+                type: integer
+            required: [owner, repo]
+
+        - name: get-issue
+          method: GET
+          path: /repos/{{ owner }}/{{ repo }}/issues/{{ issueNumber }}
+          description: Get one issue (or PR, via its number) with body and labels.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              owner:
+                type: string
+              repo:
+                type: string
+              issueNumber:
+                type: integer
+            required: [owner, repo, issueNumber]
+
+        - name: create-issue
+          method: POST
+          path: /repos/{{ owner }}/{{ repo }}/issues
+          description: Create an issue (body is GitHub-flavored markdown).
+          requestBodyMapping: path_and_json
+          parameters:
+            type: object
+            properties:
+              owner:
+                type: string
+              repo:
+                type: string
+              title:
+                type: string
+              body:
+                type: string
+                description: Markdown body.
+              labels:
+                type: array
+                items: { type: string }
+              assignees:
+                type: array
+                items: { type: string }
+            required: [owner, repo, title]
+
+        - name: update-issue
+          method: PATCH
+          path: /repos/{{ owner }}/{{ repo }}/issues/{{ issueNumber }}
+          description: Update an issue — retitle, edit body, relabel, close/reopen (state).
+          requestBodyMapping: path_and_json
+          parameters:
+            type: object
+            properties:
+              owner:
+                type: string
+              repo:
+                type: string
+              issueNumber:
+                type: integer
+              title:
+                type: string
+              body:
+                type: string
+              state:
+                type: string
+                description: '"open" or "closed".'
+              labels:
+                type: array
+                items: { type: string }
+              assignees:
+                type: array
+                items: { type: string }
+            required: [owner, repo, issueNumber]
+
+        - name: list-issue-comments
+          method: GET
+          path: /repos/{{ owner }}/{{ repo }}/issues/{{ issueNumber }}/comments
+          description: List comments on an issue or pull request (shared endpoint).
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              owner:
+                type: string
+              repo:
+                type: string
+              issueNumber:
+                type: integer
+              per_page:
+                type: integer
+              page:
+                type: integer
+            required: [owner, repo, issueNumber]
+
+        - name: comment-on-issue
+          method: POST
+          path: /repos/{{ owner }}/{{ repo }}/issues/{{ issueNumber }}/comments
+          description: Comment on an issue or pull request (markdown body; shared endpoint).
+          requestBodyMapping: path_and_json
+          parameters:
+            type: object
+            properties:
+              owner:
+                type: string
+              repo:
+                type: string
+              issueNumber:
+                type: integer
+              body:
+                type: string
+            required: [owner, repo, issueNumber, body]
+
+        # ── Pull requests ──
+        - name: list-pulls
+          method: GET
+          path: /repos/{{ owner }}/{{ repo }}/pulls
+          description: List pull requests.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              owner:
+                type: string
+              repo:
+                type: string
+              state:
+                type: string
+                description: '"open" (default), "closed", or "all".'
+              base:
+                type: string
+                description: Filter by base branch.
+              per_page:
+                type: integer
+              page:
+                type: integer
+            required: [owner, repo]
+
+        - name: get-pull
+          method: GET
+          path: /repos/{{ owner }}/{{ repo }}/pulls/{{ pullNumber }}
+          description: Get a PR — branches, mergeability, review state, changed-file/line counts.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              owner:
+                type: string
+              repo:
+                type: string
+              pullNumber:
+                type: integer
+            required: [owner, repo, pullNumber]
+
+        - name: list-pull-files
+          method: GET
+          path: /repos/{{ owner }}/{{ repo }}/pulls/{{ pullNumber }}/files
+          description: >
+            List a PR's changed files, each with its unified diff in the
+            "patch" field — the way to review actual changes.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              owner:
+                type: string
+              repo:
+                type: string
+              pullNumber:
+                type: integer
+              per_page:
+                type: integer
+                description: Keep small (5-15); patches are large.
+              page:
+                type: integer
+            required: [owner, repo, pullNumber]
+
+        # ── Search ──
+        - name: search-issues
+          method: GET
+          path: /search/issues
+          description: >
+            Search issues and PRs across repos with GitHub search qualifiers
+            (fetch the github/search-guide skill for the syntax).
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties:
+              q:
+                type: string
+                description: 'e.g. "repo:acme/api is:pr is:open review:required".'
+              sort:
+                type: string
+                description: '"created", "updated", "comments".'
+              order:
+                type: string
+                description: '"asc" or "desc".'
+              per_page:
+                type: integer
+              page:
+                type: integer
+            required: [q]
+
+        - name: search-code
+          method: GET
+          path: /search/code
+          description: Search code across repos the token can see (q with qualifiers like repo:, path:, language:).
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties:
+              q:
+                type: string
+              per_page:
+                type: integer
+            required: [q]
+
+        - name: get-file-content
+          method: GET
+          path: /repos/{{ owner }}/{{ repo }}/contents/{{ path }}
+          description: >
+            Get a file from a repo. Content comes base64-encoded — decode
+            with code execution. Use ref for a branch/tag/SHA.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              owner:
+                type: string
+              repo:
+                type: string
+              path:
+                type: string
+                description: File path within the repo, e.g. "src/app/main.py".
+              ref:
+                type: string
+                description: Branch, tag, or commit SHA (default branch if omitted).
+            required: [owner, repo, path]
+
+        # ── Actions (CI) ──
+        - name: list-workflow-runs
+          method: GET
+          path: /repos/{{ owner }}/{{ repo }}/actions/runs
+          description: List recent workflow runs — CI status overview.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              owner:
+                type: string
+              repo:
+                type: string
+              branch:
+                type: string
+              status:
+                type: string
+                description: 'e.g. "failure", "success", "in_progress".'
+              per_page:
+                type: integer
+            required: [owner, repo]
+
+        - name: list-run-jobs
+          method: GET
+          path: /repos/{{ owner }}/{{ repo }}/actions/runs/{{ runId }}/jobs
+          description: List a run's jobs with per-step status — locates which step failed.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              owner:
+                type: string
+              repo:
+                type: string
+              runId:
+                type: integer
+            required: [owner, repo, runId]
+
+        # ── Notifications ──
+        - name: list-notifications
+          method: GET
+          path: /notifications
+          description: >
+            The authenticated user's notification inbox (mentions, review
+            requests, subscribed threads). Use since/before to window.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties:
+              all:
+                type: boolean
+                description: true includes read notifications.
+              since:
+                type: string
+                description: ISO 8601 lower bound.
+              per_page:
+                type: integer
+
+  # ─────────────────────────────────────────────
+  # Webhook (register in repo/org Settings → Webhooks, content type JSON)
+  # ─────────────────────────────────────────────
+  webhooks:
+    - path: github/events
+      targetType: agent
+      agentName: github/assistant
+      description: >
+        Receives GitHub webhooks (issues, issue comments, pull requests)
+        and forwards them to the assistant, one conversation per
+        issue/PR. GitHub's initial ping is accepted automatically (any
+        2xx). Dedup on the delivery id absorbs redeliveries.
+      httpMethod: POST
+      requiresAuth: false
+      responseMode: async
+      dedup:
+        key: "header:X-GitHub-Delivery"
+        ttlSeconds: 3600
+      # Every reference is guarded with `is defined`: one undefined variable
+      # makes the runtime fall back to the raw JSON payload as the message.
+      messageTemplate: |
+        [GitHub {{ action if action is defined else 'ping' }} event{% if repository is defined %} in {{ repository.full_name }}{% endif %}{% if sender is defined %} by {{ sender.login }}{% endif %}]
+        {% if issue is defined %}Issue #{{ issue.number }}: {{ issue.title }}
+        {% endif %}{% if pull_request is defined %}PR #{{ pull_request.number }}: {{ pull_request.title }}
+        {% endif %}{% if comment is defined %}Comment: {{ comment.body }}
+        {% endif %}Act on this event according to your triage instructions; if this is
+        a ping or no action is needed, note that briefly.
+      sessionKeyTemplate: "gh-{% if repository is defined %}{{ repository.full_name }}{% endif %}-{% if issue is defined %}{{ issue.number }}{% elif pull_request is defined %}{{ pull_request.number }}{% endif %}"
+
+  # ─────────────────────────────────────────────
+  # Skills
+  # ─────────────────────────────────────────────
+  skills:
+    - namespace: github
+      name: search-guide
+      description: >
+        GitHub search qualifiers for issues/PRs and code, plus API
+        conventions (issue/PR duality, pagination, markdown).
+      content: |
+        # GitHub Search & API Conventions
+
+        ## Issue/PR search qualifiers (search-issues q)
+
+        Combine with spaces (AND). Negate with -qualifier.
+
+        - repo:owner/name, org:name, user:name
+        - is:issue / is:pr — ALWAYS include one, results mix both
+        - is:open / is:closed / is:merged / is:draft
+        - author:user, assignee:user, mentions:user, involves:user
+        - label:"bug", -label:wontfix, no:assignee, no:label
+        - review:required / review:approved / review:changes_requested
+        - created:>2026-08-01, updated:<2026-08-15, closed:2026-08-01..2026-08-21
+        - in:title, in:body — scope free-text terms
+        - sort via the sort/order parameters, not the query
+
+        Recipes:
+        - PRs waiting on my review: is:pr is:open review-requested:USERNAME
+        - Stale open bugs: repo:acme/api is:issue is:open label:bug updated:<2026-07-21
+        - My recently merged work: is:pr is:merged author:USERNAME updated:>2026-08-01
+
+        ## Code search qualifiers (search-code q)
+
+        - repo:owner/name, path:src/, language:python, filename:config.yaml
+        - Terms match code tokens, e.g.: repo:acme/api language:python "def handler"
+
+        ## API conventions
+
+        - PRs ARE issues: list-issues includes PRs (they carry a
+          pull_request key); comments use the shared issues comment
+          endpoints; issueNumber == PR number.
+        - Pagination: per_page + page. Keep pages small; patches
+          (list-pull-files) are token-heavy.
+        - Issue/comment bodies are GitHub-flavored markdown — write them
+          as normal markdown.
+        - get-file-content returns base64 in "content" — decode with code
+          execution; check "size" first (skip decoding files > ~50 KB).
+        - Rate limits: 5000 req/h for PATs; search endpoints have a lower
+          separate budget (30/min) — prefer list endpoints when you know
+          the repo.
+
+  # ─────────────────────────────────────────────
+  # Agents
+  # ─────────────────────────────────────────────
+  agents:
+    - namespace: github
+      name: assistant
+      description: >
+        GitHub assistant: search and triage issues and PRs, summarize
+        changes and reviews, check CI runs, read files, comment, and
+        manage issues.
+      temperature: 0.2
+      systemTools:
+        - codeExecution
+      enabledConnectors:
+        - connector: github/rest-api
+          operations:
+            - get-me
+            - list-issues
+            - get-issue
+            - create-issue
+            - update-issue
+            - list-issue-comments
+            - comment-on-issue
+            - list-pulls
+            - get-pull
+            - list-pull-files
+            - search-issues
+            - search-code
+            - get-file-content
+            - list-workflow-runs
+            - list-run-jobs
+            - list-notifications
+      enabledSkills:
+        - skill: github/search-guide
+          preload: false
+      systemPrompt: |
+        You are a GitHub assistant working with the user's repositories.
+
+        Reading and triage:
+        - For cross-repo or filtered queries, use search-issues (fetch the
+          github/search-guide skill first — always add is:issue or is:pr).
+          When you know the repo, prefer the list endpoints (cheaper rate
+          limits). Remember list-issues includes PRs; filter by the
+          pull_request key.
+        - To review a PR: get-pull for status and review state, then
+          list-pull-files with a small per_page — the patch fields are the
+          diff. Summarize per file, flag risky changes.
+        - For CI: list-workflow-runs (status=failure first), then
+          list-run-jobs to find the failing step.
+        - get-file-content returns base64 — decode with code execution;
+          check size first and skip files over ~50 KB.
+
+        Writing:
+        - Confirm with the user before creating/updating issues or posting
+          comments — show the exact markdown you will post. Never close an
+          issue the user didn't explicitly ask to close.
+        - Reference issues/PRs as owner/repo#123 with a link
+          (https://github.com/owner/repo/issues/123).
+
+        Inbound events:
+        - A message starting with "[GitHub ... event ...]" is a webhook
+          notification. Triage it per your instructions (summarize, label,
+          or comment as configured); for a ping or an event needing no
+          action, reply with one short line saying so. Confirmation rules
+          are waived only for actions your triage instructions explicitly
+          direct.

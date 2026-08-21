@@ -598,14 +598,17 @@ spec:
       dedup:
         key: "header:X-Atlassian-Webhook-Identifier"
         ttlSeconds: 3600
+      # Guarded with `is defined` per section: one undefined variable makes
+      # the runtime fall back to the raw JSON payload as the message.
       messageTemplate: |
-        [Jira event: {{ webhookEvent }}]
-        Issue {{ issue.key }}: {{ issue.fields.summary }}
+        [Jira event: {{ webhookEvent if webhookEvent is defined else 'unknown' }}]
+        {% if issue is defined %}Issue {{ issue.key }}: {{ issue.fields.summary }}
         Status: {{ issue.fields.status.name }}
-        Actor: {{ user.displayName }}
-        Act on this event according to your triage instructions; if no
+        {% endif %}{% if user is defined %}Actor: {{ user.displayName }}
+        {% endif %}{% if comment is defined %}Comment: {{ comment.body }}
+        {% endif %}Act on this event according to your triage instructions; if no
         action is needed, briefly note why.
-      sessionKeyTemplate: "jira-{{ issue.key }}"
+      sessionKeyTemplate: "jira-{% if issue is defined %}{{ issue.key }}{% endif %}"
 
   # ─────────────────────────────────────────────
   # Skills

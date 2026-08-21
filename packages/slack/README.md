@@ -1,5 +1,7 @@
 # Slack
 
+> ⚠️ **Experimental / parked.** Functional and live-tested, but unlike the other integrations it needs two handler functions (Slack's URL-verification handshake and bot-echo filtering). It is parked until the platform grows declarative webhook filters + handshake support, at which point the functions disappear. Use at your own discretion meanwhile.
+
 Slack integration for Sinas via a bot token: post messages and thread replies, read and summarize channels, DM users, react — plus **inbound events** (requires Sinas ≥ 0.4.0): @mention the bot or DM it, and `slack/assistant` answers in-thread with per-thread conversation memory.
 
 ## What's inside

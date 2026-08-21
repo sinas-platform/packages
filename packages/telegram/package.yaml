@@ -231,10 +231,15 @@ spec:
       dedup:
         key: "$.update_id"
         ttlSeconds: 3600
+      # Guarded with `is defined`: one undefined variable makes the runtime
+      # fall back to the raw JSON payload as the message (e.g. photo messages
+      # have no .text; edited_message updates have no .message at all).
       messageTemplate: |
-        [Telegram message from {{ message.from.first_name }} (chat_id {{ message.chat.id }})]
-        {{ message.text }}
-      sessionKeyTemplate: "tg-{{ message.chat.id }}"
+        {% if message is defined %}[Telegram message from {{ message.from.first_name if message.from is defined else 'unknown' }} (chat_id {{ message.chat.id }})]
+        {{ message.text if message.text is defined else '(non-text message)' }}
+        {% else %}[Telegram update without a message payload — likely an edit, callback, or membership change. Usually no action needed.]
+        {% endif %}
+      sessionKeyTemplate: "tg-{% if message is defined %}{{ message.chat.id }}{% endif %}"
 
   # ─────────────────────────────────────────────
   # Skills
