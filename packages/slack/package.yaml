@@ -275,16 +275,13 @@ spec:
             if not (is_mention or is_dm):
                 return {"ok": True, "skipped": "irrelevant_event"}
 
-            from sinas import SinasClient
-            client = SinasClient(
-                base_url="${{ vars.SINAS_INTERNAL_URL }}",
-                token=context["access_token"],
-            )
-            client.functions.enqueue(
-                "slack", "process_event",
-                input={"event": event},
-                trigger_id=input_data.get("event_id"),
-            )
+            import requests
+            requests.post(
+                "${{ vars.SINAS_INTERNAL_URL }}/functions/slack/process_event/execute/async",
+                headers={"Authorization": "Bearer " + context["access_token"]},
+                json={"input": {"event": event}},
+                timeout=8,
+            ).raise_for_status()
             return {"ok": True}
 
     - namespace: slack
@@ -311,20 +308,20 @@ spec:
             user = event.get("user", "unknown")
             text = event.get("text", "")
 
-            from sinas import SinasClient
-            client = SinasClient(
-                base_url="${{ vars.SINAS_INTERNAL_URL }}",
-                token=context["access_token"],
+            resp = requests.post(
+                "${{ vars.SINAS_INTERNAL_URL }}/agents/slack/assistant/invoke",
+                headers={"Authorization": "Bearer " + context["access_token"]},
+                json={
+                    "message": (
+                        f"[Inbound Slack message from <@{user}> in <#{channel}>, "
+                        f"thread {thread_ts}]\n{text}"
+                    ),
+                    "session_key": f"slack-{channel}-{thread_ts}",
+                },
+                timeout=280,
             )
-
-            result = client.chats.invoke(
-                "slack", "assistant",
-                message=(
-                    f"[Inbound Slack message from <@{user}> in <#{channel}>, "
-                    f"thread {thread_ts}]\n{text}"
-                ),
-                session_key=f"slack-{channel}-{thread_ts}",
-            )
+            resp.raise_for_status()
+            result = resp.json()
 
             reply = (result or {}).get("reply") or ""
             if reply:
