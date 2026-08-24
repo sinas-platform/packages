@@ -1,0 +1,421 @@
+apiVersion: sinas.co/v1
+kind: SinasPackage
+package:
+  name: google-calendar
+  version: "0.1.0"
+  description: >
+    Google Calendar integration: Calendar v3 connector with per-user OAuth
+    (Connect your account), an event-format skill, and a scheduling agent
+    that finds slots, creates and updates events.
+  author: Sinas
+  url: https://github.com/sinas-platform/sinas-packages
+
+spec:
+  # ─────────────────────────────────────────────
+  # Install-time variables
+  # ─────────────────────────────────────────────
+  variables:
+    - name: GOOGLE_CLIENT_ID
+      type: text
+      description: >
+        OAuth client ID of your Google Cloud project (Web application
+        credentials), e.g. 1234-abc.apps.googleusercontent.com.
+      required: true
+
+    - name: GOOGLE_CLIENT_SECRET
+      type: secret
+      description: OAuth client secret of the same Google Cloud credentials.
+      required: true
+
+  # ─────────────────────────────────────────────
+  # Connector
+  # ─────────────────────────────────────────────
+  connectors:
+    - namespace: gcal
+      name: calendar-api
+      description: >
+        Google Calendar API v3: calendars, events, free/busy lookups, and
+        recurring-event instances. Each user connects their own Google
+        account via OAuth.
+      baseUrl: https://www.googleapis.com/calendar/v3
+      auth:
+        type: oauth2_authorization_code
+        # access_type=offline + prompt=consent are required for Google to
+        # issue a refresh token; extra authorize params are baked into the URL.
+        authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth?access_type=offline&prompt=consent"
+        tokenUrl: https://oauth2.googleapis.com/token
+        clientId: "${{ vars.GOOGLE_CLIENT_ID }}"
+        secret: "{{GOOGLE_CLIENT_SECRET}}"
+        scopes:
+          - https://www.googleapis.com/auth/calendar
+      headers:
+        Accept: application/json
+      retry:
+        maxAttempts: 3
+        backoff: exponential
+      timeoutSeconds: 30
+      operations:
+        - name: list-calendars
+          method: GET
+          path: /users/me/calendarList
+          description: List the user's calendars (id, summary, timeZone, accessRole). The primary calendar has id "primary".
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties:
+              maxResults:
+                type: integer
+              pageToken:
+                type: string
+
+        - name: get-timezone-setting
+          method: GET
+          path: /users/me/settings/timezone
+          description: Get the user's default timezone setting (IANA name, e.g. Europe/Amsterdam).
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties: {}
+
+        - name: list-events
+          method: GET
+          path: /calendars/{{ calendarId }}/events
+          description: >
+            List events in a time window. Use singleEvents=true with
+            orderBy=startTime to expand recurring events chronologically.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              calendarId:
+                type: string
+                description: Calendar id, usually "primary".
+              timeMin:
+                type: string
+                description: RFC3339 lower bound, e.g. 2026-07-22T00:00:00+02:00.
+              timeMax:
+                type: string
+                description: RFC3339 upper bound (exclusive).
+              q:
+                type: string
+                description: Free-text search over event fields.
+              singleEvents:
+                type: boolean
+                description: Expand recurring events into instances.
+              orderBy:
+                type: string
+                description: '"startTime" (requires singleEvents=true) or "updated".'
+              maxResults:
+                type: integer
+              pageToken:
+                type: string
+              timeZone:
+                type: string
+                description: IANA timezone for response times.
+            required: [calendarId]
+
+        - name: get-event
+          method: GET
+          path: /calendars/{{ calendarId }}/events/{{ eventId }}
+          description: Get a single event by id.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              calendarId:
+                type: string
+              eventId:
+                type: string
+            required: [calendarId, eventId]
+
+        - name: create-event
+          method: POST
+          path: /calendars/{{ calendarId }}/events
+          description: >
+            Create an event. start/end use {"dateTime": "...", "timeZone":
+            "..."} for timed events or {"date": "YYYY-MM-DD"} for all-day
+            (fetch the gcal/event-format skill for details).
+          requestBodyMapping: path_and_json
+          parameters:
+            type: object
+            properties:
+              calendarId:
+                type: string
+              summary:
+                type: string
+                description: Event title.
+              description:
+                type: string
+              location:
+                type: string
+              start:
+                type: object
+                description: '{"dateTime": "2026-07-22T10:00:00", "timeZone": "Europe/Amsterdam"} or {"date": "2026-07-22"}.'
+              end:
+                type: object
+                description: Same shape as start; end is exclusive for all-day events.
+              attendees:
+                type: array
+                items: { type: object }
+                description: '[{"email": "a@b.com"}, ...]'
+              recurrence:
+                type: array
+                items: { type: string }
+                description: 'RRULE lines, e.g. ["RRULE:FREQ=WEEKLY;BYDAY=MO"].'
+              reminders:
+                type: object
+                description: '{"useDefault": true} or {"useDefault": false, "overrides": [{"method": "popup", "minutes": 10}]}.'
+              transparency:
+                type: string
+                description: '"opaque" (busy, default) or "transparent" (free).'
+            required: [calendarId, summary, start, end]
+
+        - name: update-event
+          method: PATCH
+          path: /calendars/{{ calendarId }}/events/{{ eventId }}
+          description: Patch an event — only the provided fields are changed.
+          requestBodyMapping: path_and_json
+          parameters:
+            type: object
+            properties:
+              calendarId:
+                type: string
+              eventId:
+                type: string
+              summary:
+                type: string
+              description:
+                type: string
+              location:
+                type: string
+              start:
+                type: object
+              end:
+                type: object
+              attendees:
+                type: array
+                items: { type: object }
+                description: Full replacement list of attendees.
+              recurrence:
+                type: array
+                items: { type: string }
+            required: [calendarId, eventId]
+
+        - name: delete-event
+          method: DELETE
+          path: /calendars/{{ calendarId }}/events/{{ eventId }}
+          description: Delete an event.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              calendarId:
+                type: string
+              eventId:
+                type: string
+            required: [calendarId, eventId]
+
+        - name: move-event
+          method: POST
+          path: /calendars/{{ calendarId }}/events/{{ eventId }}/move
+          description: Move an event to another calendar.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              calendarId:
+                type: string
+                description: Source calendar id.
+              eventId:
+                type: string
+              destination:
+                type: string
+                description: Target calendar id.
+            required: [calendarId, eventId, destination]
+
+        - name: list-instances
+          method: GET
+          path: /calendars/{{ calendarId }}/events/{{ eventId }}/instances
+          description: List instances of a recurring event in a window.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              calendarId:
+                type: string
+              eventId:
+                type: string
+              timeMin:
+                type: string
+              timeMax:
+                type: string
+              maxResults:
+                type: integer
+            required: [calendarId, eventId]
+
+        - name: query-freebusy
+          method: POST
+          path: /freeBusy
+          description: >
+            Get busy intervals for one or more calendars in a window — the
+            basis for finding open slots.
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              timeMin:
+                type: string
+                description: RFC3339 start of the window.
+              timeMax:
+                type: string
+                description: RFC3339 end of the window.
+              timeZone:
+                type: string
+              items:
+                type: array
+                items: { type: object }
+                description: 'Calendars to check: [{"id": "primary"}, {"id": "colleague@company.com"}].'
+            required: [timeMin, timeMax, items]
+
+        - name: quick-add
+          method: POST
+          path: /calendars/{{ calendarId }}/events/quickAdd
+          description: Create an event from a natural-language string ("Lunch with Sam Friday 12pm"). Prefer create-event for precise control.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              calendarId:
+                type: string
+              text:
+                type: string
+                description: Natural-language event description.
+            required: [calendarId, text]
+
+  # ─────────────────────────────────────────────
+  # Skills
+  # ─────────────────────────────────────────────
+  skills:
+    - namespace: gcal
+      name: event-format
+      description: >
+        Google Calendar event format reference: date vs dateTime, timezones,
+        recurrence RRULEs, attendees, free/busy interpretation, pagination.
+      content: |
+        # Google Calendar Event Format
+
+        ## start / end
+
+        Timed event:
+        ```json
+        "start": { "dateTime": "2026-07-22T10:00:00", "timeZone": "Europe/Amsterdam" },
+        "end":   { "dateTime": "2026-07-22T11:00:00", "timeZone": "Europe/Amsterdam" }
+        ```
+        All-day event (end date is EXCLUSIVE — a one-day event on the 22nd
+        ends on the 23rd):
+        ```json
+        "start": { "date": "2026-07-22" },
+        "end":   { "date": "2026-07-23" }
+        ```
+        Never mix date and dateTime in one event. When the user gives a
+        local time, pass a naive dateTime plus an explicit timeZone rather
+        than computing UTC offsets yourself.
+
+        ## Recurrence
+
+        `recurrence` is an array of RRULE strings on the master event:
+        - Weekly on Mon+Wed: `RRULE:FREQ=WEEKLY;BYDAY=MO,WE`
+        - Every workday: `RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR`
+        - Monthly on the first Monday: `RRULE:FREQ=MONTHLY;BYDAY=1MO`
+        - 10 occurrences: `RRULE:FREQ=DAILY;COUNT=10`
+        - Until a date: `RRULE:FREQ=WEEKLY;UNTIL=20261231T235959Z`
+
+        Reading recurring events: list-events with singleEvents=true
+        expands instances; the master event id + list-instances shows a
+        specific series. Patching an instance changes only that instance;
+        patching the master changes the series.
+
+        ## Attendees
+
+        ```json
+        "attendees": [{ "email": "sam@company.com", "optional": true }]
+        ```
+        Responses appear as attendee responseStatus: needsAction, accepted,
+        declined, tentative. update-event replaces the WHOLE attendees
+        array — read the event first, then write the full list back with
+        changes.
+
+        ## Free/busy
+
+        query-freebusy returns busy intervals per calendar:
+        ```json
+        "calendars": { "primary": { "busy": [
+          { "start": "...T09:00:00Z", "end": "...T10:30:00Z" } ] } }
+        ```
+        Open slots = gaps between busy intervals within working hours.
+        Empty busy array = fully free in the window.
+
+        ## Pagination & etiquette
+
+        - list responses return nextPageToken — pass as pageToken to
+          continue. Keep maxResults modest (25-50).
+        - Event ids are opaque strings; always take them from a prior
+          list/get response, never invent them.
+
+  # ─────────────────────────────────────────────
+  # Agents
+  # ─────────────────────────────────────────────
+  agents:
+    - namespace: gcal
+      name: scheduler
+      description: >
+        Calendar assistant: review the schedule, find open slots across
+        calendars, and create, update, move, or cancel events.
+      temperature: 0.1
+      enabledConnectors:
+        - connector: gcal/calendar-api
+          operations:
+            - list-calendars
+            - get-timezone-setting
+            - list-events
+            - get-event
+            - create-event
+            - update-event
+            - delete-event
+            - move-event
+            - list-instances
+            - query-freebusy
+            - quick-add
+      enabledSkills:
+        - skill: gcal/event-format
+          preload: false
+      systemPrompt: |
+        You are a calendar assistant working on the user's Google Calendar.
+
+        Grounding:
+        - At the start of a conversation, call get-timezone-setting once
+          and use that timezone for all times you compute or display.
+        - Default calendarId is "primary" unless the user names another
+          calendar (resolve via list-calendars).
+        - Before writing events with recurrence, attendees, or all-day
+          dates, fetch the gcal/event-format skill — the start/end and
+          RRULE formats have sharp edges.
+
+        Reading:
+        - For "what's on my calendar", use list-events with
+          singleEvents=true, orderBy=startTime, and an explicit
+          timeMin/timeMax window. Present events chronologically with
+          local times.
+
+        Finding slots:
+        - Use query-freebusy over the relevant calendars and working
+          hours; propose 2-3 concrete options with local times.
+
+        Writing:
+        - Always confirm title, date, time, duration, and attendees with
+          the user before create-event, and show what will change before
+          update-event / delete-event / move-event.
+        - When updating attendees, read the event first and write back the
+          full attendee list (the API replaces the array).
+        - Mention that attendees will receive invitations when you add
+          them.

@@ -31,6 +31,13 @@ Install the sinas/package-author package
 |---|---|
 | [sinas-package-author](packages/sinas-package-author/) | Skill + reference agent for authoring Sinas packages. Gives an agent the ability to draft, validate, preview, and install packages. |
 | [ddf-powerpoint](packages/ddf-powerpoint/) | Create PowerPoint presentations from DDF YAML. Includes validator, compiler, and the full DDF specification as a skill. |
+| [jira](packages/jira/) | Jira Cloud integration: Platform + Agile API connectors, JQL/ADF skills, a general assistant, and an hours-tracker agent for worklogs. |
+| [google-calendar](packages/google-calendar/) | Google Calendar with per-user OAuth: Calendar v3 connector, event-format skill, and a scheduling agent. |
+| [gmail](packages/gmail/) | Gmail with per-user OAuth: search/triage/labels/drafts connector, query + MIME skills, and an inbox assistant. |
+| [google-drive-docs](packages/google-drive-docs/) | Drive & Docs with per-user OAuth: search and markdown export, template-based doc creation and editing, librarian agent. |
+| [slack](packages/slack/) | ⚠️ Experimental/parked. Slack Web API via bot token incl. inbound events — works, but relies on handler functions until webhook filters/handshake support land. |
+| [telegram](packages/telegram/) | Telegram Bot API: notifications, formatted reports, and fully declarative inbound chat (message the bot → agent replies, per-chat memory). |
+| [github](packages/github/) | GitHub REST API: issues, PRs with diffs, CI runs, code search, notifications, and a declarative issues/PRs/comments webhook. |
 
 ## Package structure
 
@@ -42,6 +49,10 @@ packages/
     package.yaml     # The installable package (kind: SinasPackage)
     README.md        # Documentation
 ```
+
+## Authoring
+
+See [AUTHORING.md](AUTHORING.md) for the live-verified authoring guide: connector schema realities, webhook template guarding, pipeline cursor semantics, function runtime constraints, and the testing workflow.
 
 ## Contributing
 
