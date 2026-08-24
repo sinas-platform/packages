@@ -17,8 +17,6 @@ GitHub integration for Sinas: issues, pull requests, CI runs, code/file access, 
 |---|---|---|
 | `GITHUB_TOKEN` | secret | Fine-grained PAT (recommended — scope it to the repos and permissions you need) or classic PAT with `repo` scope |
 
-> Note (Sinas 0.4.0-rc): until the package secret-variable fix lands, pre-create the secret first: `POST /api/v1/secrets {"name": "GITHUB_TOKEN", "value": "...", "visibility": "shared"}` — then install.
-
 ## Enabling inbound events
 
 Repo (or org) **Settings → Webhooks → Add webhook**: Payload URL `https://<your-sinas-domain>/webhooks/github/events`, content type **application/json**, select events (issues, issue comments, pull requests). GitHub's initial ping succeeds automatically (no handshake needed); redeliveries are absorbed by dedup on the delivery id. Webhook secret/HMAC is not verified (platform limitation) — treat the URL as private.
