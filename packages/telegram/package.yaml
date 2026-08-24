@@ -33,6 +33,14 @@ spec:
       default: telegram/updates
       required: true
 
+    - name: SINAS_INTERNAL_URL
+      type: text
+      description: >
+        Base URL where function containers reach the Sinas API (used by the
+        optional polling pipeline to invoke the agent).
+      default: http://host.docker.internal:8000
+      required: true
+
   # ─────────────────────────────────────────────
   # Connector
   # ─────────────────────────────────────────────
@@ -215,7 +223,103 @@ spec:
             properties: {}
 
   # ─────────────────────────────────────────────
-  # Webhooks (inbound: point Telegram here via the set-webhook operation)
+  # Inbound option B: polling pipeline (no public URL needed)
+  #
+  # Disabled by default — enable BOTH the pipeline and the schedule to use
+  # polling mode. Mutually exclusive on Telegram's side with a registered
+  # webhook: getUpdates returns 409 while one is set (delete-webhook first).
+  # ─────────────────────────────────────────────
+  functions:
+    - namespace: telegram
+      name: poll_updates
+      description: >
+        Poll Telegram getUpdates from the pipeline cursor (offset), invoke
+        the notifier agent per message (one conversation per chat), and
+        return next_offset (= max update_id + 1) as the new cursor.
+      sharedPool: true
+      timeout: 300
+      inputSchema:
+        type: object
+        properties:
+          offset:
+            type: string
+            description: Pipeline cursor — last confirmed update_id + 1.
+      code: |
+        def handler(input_data, context):
+            import requests
+
+            base = "https://api.telegram.org/bot${{ vars.TELEGRAM_BOT_TOKEN }}"
+            offset = input_data.get("offset")
+
+            params = {"timeout": 0, "allowed_updates": '["message"]'}
+            if offset not in (None, ""):
+                params["offset"] = int(offset)
+
+            resp = requests.get(f"{base}/getUpdates", params=params, timeout=20).json()
+            if not resp.get("ok"):
+                raise Exception(f"getUpdates failed: {resp.get('description')}")
+
+            updates = resp["result"]
+            next_offset = int(offset) if offset not in (None, "") else 0
+            processed = skipped = 0
+
+            for u in updates:
+                next_offset = max(next_offset, u["update_id"] + 1)
+                msg = u.get("message")
+                if not msg or not msg.get("chat"):
+                    skipped += 1
+                    continue
+                chat_id = msg["chat"]["id"]
+                sender = (msg.get("from") or {}).get("first_name", "unknown")
+                text = msg.get("text") or "(non-text message)"
+                r = requests.post(
+                    "${{ vars.SINAS_INTERNAL_URL }}/agents/telegram/notifier/invoke",
+                    headers={"Authorization": "Bearer " + context["access_token"]},
+                    json={
+                        "message": f"[Telegram message from {sender} (chat_id {chat_id})]\n{text}",
+                        "session_key": f"tg-{chat_id}",
+                    },
+                    timeout=280,
+                )
+                r.raise_for_status()
+                processed += 1
+
+            return {
+                "processed": processed,
+                "skipped": skipped,
+                "updates_seen": len(updates),
+                "next_offset": next_offset,
+            }
+
+  pipelines:
+    - namespace: telegram
+      name: poll-inbox
+      description: >
+        Inbound Telegram without a public URL: polls getUpdates on a
+        durable cursor and routes each message to the notifier agent.
+        Enable together with the telegram-poll-inbox schedule.
+      isActive: false
+      concurrency: single
+      disableAfterFailures: 10
+      steps:
+        - name: poll
+          type: function
+          function: telegram/poll_updates
+          cursor:
+            param: offset
+            # JMESPath over the RUN context (not the step output):
+            path: steps.poll.output.next_offset
+
+  schedules:
+    - name: telegram-poll-inbox
+      scheduleType: pipeline
+      pipelineName: telegram/poll-inbox
+      description: Drives the telegram/poll-inbox polling pipeline. Enable together with the pipeline.
+      cronExpression: "* * * * *"
+      isActive: false
+
+  # ─────────────────────────────────────────────
+  # Webhooks (inbound option A: point Telegram here via set-webhook)
   # ─────────────────────────────────────────────
   webhooks:
     - path: "${{ vars.TELEGRAM_WEBHOOK_PATH }}"

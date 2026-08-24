@@ -34,6 +34,12 @@ Telegram Bot API integration for Sinas: the `telegram/notifier` agent sends form
 2. Ask the `notifier` agent to run `set-webhook` with `url: https://<your-sinas-domain>/webhooks/<that path>` — or curl the Bot API yourself.
 3. Message the bot on Telegram. Updates dedup on `$.update_id`; each chat gets its own persistent conversation (`sessionKeyTemplate: tg-{{ message.chat.id }}`); bots never see their own messages, so there is no loop risk. `get-webhook-info` shows delivery status and last errors.
 
+## Inbound option B: polling (no public URL needed)
+
+For local/private instances that Telegram can't reach, the package ships a **polling pipeline** (`telegram/poll-inbox` + the `telegram-poll-inbox` schedule, every minute) — same result as the webhook: message the bot, the agent answers, per-chat memory. It polls `getUpdates` on a durable pipeline cursor (`offset`), so nothing is processed twice and nothing is missed (at-least-once with cursor commit only on success).
+
+**Disabled by default** — enable *both* the pipeline and the schedule in the console to turn it on. Do not combine with a registered Telegram webhook: `getUpdates` returns 409 while one is set (`delete-webhook` first). Cost note: one cheap function run per minute; the LLM is only invoked when there are actual messages.
+
 ## Roadmap
 
-- **getUpdates polling** (`offset` is a textbook cursor) as an alternative inbound path via the new pipelines feature, for instances without a public HTTPS endpoint.
+- Webhook HMAC-equivalent (`secret_token` header verification) — pending platform header support.
