@@ -50,6 +50,10 @@ packages/
     README.md        # Documentation
 ```
 
+## Authoring
+
+See [AUTHORING.md](AUTHORING.md) for the live-verified authoring guide: connector schema realities, webhook template guarding, pipeline cursor semantics, function runtime constraints, and the testing workflow.
+
 ## Contributing
 
 Packages should follow the Sinas Package schema. Key constraints:
