@@ -1,0 +1,869 @@
+apiVersion: sinas.co/v1
+kind: SinasPackage
+package:
+  name: jira
+  version: "0.1.0"
+  description: >
+    Jira Cloud integration: connectors for the Platform (REST v3) and Agile
+    APIs, JQL and ADF skills, a general Jira assistant, and an hours-tracker
+    agent for conversational worklog management.
+  author: Sinas
+  url: https://github.com/sinas-platform/sinas-packages
+
+spec:
+  # ─────────────────────────────────────────────
+  # Install-time variables
+  # ─────────────────────────────────────────────
+  variables:
+    - name: JIRA_BASE_URL
+      type: text
+      description: >
+        Base URL of your Jira Cloud site, without trailing slash.
+      example: https://your-site.atlassian.net
+      required: true
+
+    - name: JIRA_CREDENTIALS
+      type: secret
+      description: >
+        Basic-auth credentials in the form "email:api_token". Create an API
+        token at https://id.atlassian.com/manage-profile/security/api-tokens.
+      required: true
+
+  # ─────────────────────────────────────────────
+  # Connectors
+  # ─────────────────────────────────────────────
+  connectors:
+    # ── Jira Platform REST API v3 ──
+    - namespace: jira
+      name: platform-api
+      description: >
+        Jira Cloud Platform REST API v3: issues, search (JQL), comments,
+        transitions, worklogs, issue links, projects, users, and field
+        metadata.
+      baseUrl: "${{ vars.JIRA_BASE_URL }}"
+      auth:
+        type: basic
+        secret: "{{JIRA_CREDENTIALS}}"
+      headers:
+        Content-Type: application/json
+        Accept: application/json
+      retry:
+        maxAttempts: 3
+        backoff: exponential
+      timeoutSeconds: 30
+      operations:
+        # ── Search & read ──
+        - name: search-issues
+          method: POST
+          path: /rest/api/3/search/jql
+          description: >
+            Search issues with a JQL query. Returns matching issues with the
+            requested fields. Use nextPageToken for pagination.
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              jql:
+                type: string
+                description: JQL query, e.g. "project = PROJ AND status = 'In Progress' ORDER BY updated DESC"
+              fields:
+                type: array
+                items: { type: string }
+                description: Field names to return, e.g. ["summary", "status", "assignee"]. Use ["*navigable"] for all.
+              maxResults:
+                type: integer
+                description: Max issues per page (default 50, max 100).
+              nextPageToken:
+                type: string
+                description: Page token from a previous response for pagination.
+            required: [jql]
+
+        - name: get-issue
+          method: GET
+          path: /rest/api/3/issue/{{ issueIdOrKey }}
+          description: Get a single issue by key (e.g. PROJ-123) or id, with all or selected fields.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              issueIdOrKey:
+                type: string
+                description: Issue key (PROJ-123) or numeric id.
+              fields:
+                type: string
+                description: Comma-separated field names to return (omit for all).
+              expand:
+                type: string
+                description: Comma-separated expansions, e.g. "renderedFields,transitions,changelog".
+            required: [issueIdOrKey]
+
+        # ── Create & update ──
+        - name: create-issue
+          method: POST
+          path: /rest/api/3/issue
+          description: >
+            Create an issue. The fields object must include project, issuetype
+            and summary; description must be an ADF document (fetch the
+            jira/adf-guide skill for the format).
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              fields:
+                type: object
+                description: >
+                  Issue fields, e.g. {"project": {"key": "PROJ"}, "issuetype":
+                  {"name": "Task"}, "summary": "...", "description": <ADF doc>,
+                  "assignee": {"accountId": "..."}, "labels": ["x"]}.
+            required: [fields]
+
+        - name: edit-issue
+          method: PUT
+          path: /rest/api/3/issue/{{ issueIdOrKey }}
+          description: Update fields of an existing issue. Same fields format as create-issue.
+          requestBodyMapping: path_and_json
+          parameters:
+            type: object
+            properties:
+              issueIdOrKey:
+                type: string
+                description: Issue key or id.
+              fields:
+                type: object
+                description: 'Fields to set, e.g. {"summary": "New title"}.'
+              update:
+                type: object
+                description: >
+                  Operation-based updates, e.g. {"labels": [{"add": "urgent"}]}.
+            required: [issueIdOrKey]
+
+        - name: assign-issue
+          method: PUT
+          path: /rest/api/3/issue/{{ issueIdOrKey }}/assignee
+          description: Assign an issue to a user by accountId. Use null accountId to unassign, "-1" for default.
+          requestBodyMapping: path_and_json
+          parameters:
+            type: object
+            properties:
+              issueIdOrKey:
+                type: string
+              accountId:
+                type: string
+                description: Atlassian accountId of the assignee (find via search-users).
+            required: [issueIdOrKey]
+
+        # ── Transitions ──
+        - name: get-transitions
+          method: GET
+          path: /rest/api/3/issue/{{ issueIdOrKey }}/transitions
+          description: List the transitions currently available for an issue (returns transition ids and target statuses).
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              issueIdOrKey:
+                type: string
+            required: [issueIdOrKey]
+
+        - name: transition-issue
+          method: POST
+          path: /rest/api/3/issue/{{ issueIdOrKey }}/transitions
+          description: >
+            Move an issue through a workflow transition. Get valid transition
+            ids from get-transitions first.
+          requestBodyMapping: path_and_json
+          parameters:
+            type: object
+            properties:
+              issueIdOrKey:
+                type: string
+              transition:
+                type: object
+                description: 'The transition to perform, e.g. {"id": "31"}.'
+              fields:
+                type: object
+                description: Fields to set during the transition (e.g. resolution).
+            required: [issueIdOrKey, transition]
+
+        # ── Comments ──
+        - name: get-comments
+          method: GET
+          path: /rest/api/3/issue/{{ issueIdOrKey }}/comment
+          description: List comments on an issue (paginated, newest last).
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              issueIdOrKey:
+                type: string
+              startAt:
+                type: integer
+              maxResults:
+                type: integer
+              orderBy:
+                type: string
+                description: '"created" or "-created".'
+            required: [issueIdOrKey]
+
+        - name: add-comment
+          method: POST
+          path: /rest/api/3/issue/{{ issueIdOrKey }}/comment
+          description: >
+            Add a comment to an issue. The body must be an ADF document (fetch
+            the jira/adf-guide skill for the format).
+          requestBodyMapping: path_and_json
+          parameters:
+            type: object
+            properties:
+              issueIdOrKey:
+                type: string
+              body:
+                type: object
+                description: 'ADF document, e.g. {"type": "doc", "version": 1, "content": [...]}.'
+            required: [issueIdOrKey, body]
+
+        # ── Worklogs (time tracking) ──
+        - name: get-worklogs
+          method: GET
+          path: /rest/api/3/issue/{{ issueIdOrKey }}/worklog
+          description: List worklogs on an issue. startedAfter/startedBefore are epoch milliseconds.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              issueIdOrKey:
+                type: string
+              startAt:
+                type: integer
+              maxResults:
+                type: integer
+              startedAfter:
+                type: integer
+                description: Only worklogs started after this epoch-ms timestamp.
+              startedBefore:
+                type: integer
+                description: Only worklogs started before this epoch-ms timestamp.
+            required: [issueIdOrKey]
+
+        - name: add-worklog
+          method: POST
+          path: /rest/api/3/issue/{{ issueIdOrKey }}/worklog
+          description: >
+            Log time on an issue. Provide timeSpentSeconds (or timeSpent like
+            "2h 30m") and a started timestamp.
+          requestBodyMapping: path_and_json
+          parameters:
+            type: object
+            properties:
+              issueIdOrKey:
+                type: string
+              timeSpentSeconds:
+                type: integer
+                description: Time spent in seconds (e.g. 9000 for 2h30m).
+              timeSpent:
+                type: string
+                description: Alternative to timeSpentSeconds, e.g. "2h 30m".
+              started:
+                type: string
+                description: 'Start of the work, format "2026-07-22T09:00:00.000+0000".'
+              comment:
+                type: object
+                description: Optional ADF document describing the work.
+            required: [issueIdOrKey, started]
+
+        - name: update-worklog
+          method: PUT
+          path: /rest/api/3/issue/{{ issueIdOrKey }}/worklog/{{ worklogId }}
+          description: Update an existing worklog entry.
+          requestBodyMapping: path_and_json
+          parameters:
+            type: object
+            properties:
+              issueIdOrKey:
+                type: string
+              worklogId:
+                type: string
+              timeSpentSeconds:
+                type: integer
+              timeSpent:
+                type: string
+              started:
+                type: string
+              comment:
+                type: object
+            required: [issueIdOrKey, worklogId]
+
+        - name: delete-worklog
+          method: DELETE
+          path: /rest/api/3/issue/{{ issueIdOrKey }}/worklog/{{ worklogId }}
+          description: Delete a worklog entry from an issue.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              issueIdOrKey:
+                type: string
+              worklogId:
+                type: string
+            required: [issueIdOrKey, worklogId]
+
+        # ── Issue links ──
+        - name: get-issue-link-types
+          method: GET
+          path: /rest/api/3/issueLinkType
+          description: List available issue link types (Blocks, Relates, Duplicates, ...).
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties: {}
+
+        - name: create-issue-link
+          method: POST
+          path: /rest/api/3/issueLink
+          description: Link two issues, e.g. mark one as blocking another.
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              type:
+                type: object
+                description: 'Link type by name, e.g. {"name": "Blocks"}.'
+              inwardIssue:
+                type: object
+                description: 'e.g. {"key": "PROJ-1"} (the blocked issue for "Blocks").'
+              outwardIssue:
+                type: object
+                description: 'e.g. {"key": "PROJ-2"} (the blocking issue for "Blocks").'
+            required: [type, inwardIssue, outwardIssue]
+
+        # ── Projects & metadata ──
+        - name: list-projects
+          method: GET
+          path: /rest/api/3/project/search
+          description: List projects visible to the user, optionally filtered by a query string.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties:
+              query:
+                type: string
+                description: Filter by project name or key.
+              startAt:
+                type: integer
+              maxResults:
+                type: integer
+
+        - name: get-project
+          method: GET
+          path: /rest/api/3/project/{{ projectIdOrKey }}
+          description: Get a project by key or id, including issue types and lead.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              projectIdOrKey:
+                type: string
+            required: [projectIdOrKey]
+
+        - name: get-project-components
+          method: GET
+          path: /rest/api/3/project/{{ projectIdOrKey }}/components
+          description: List components of a project.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              projectIdOrKey:
+                type: string
+            required: [projectIdOrKey]
+
+        - name: get-project-versions
+          method: GET
+          path: /rest/api/3/project/{{ projectIdOrKey }}/versions
+          description: List versions (releases) of a project.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              projectIdOrKey:
+                type: string
+            required: [projectIdOrKey]
+
+        - name: get-issue-types-for-project
+          method: GET
+          path: /rest/api/3/issue/createmeta/{{ projectIdOrKey }}/issuetypes
+          description: List the issue types that can be created in a project (use before create-issue).
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              projectIdOrKey:
+                type: string
+            required: [projectIdOrKey]
+
+        - name: get-fields
+          method: GET
+          path: /rest/api/3/field
+          description: List all fields including custom fields (ids, names, types). Use to resolve custom field ids.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties: {}
+
+        # ── Users ──
+        - name: search-users
+          method: GET
+          path: /rest/api/3/user/search
+          description: Find users by name or email to get their accountId.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties:
+              query:
+                type: string
+                description: Name or email fragment to match.
+              maxResults:
+                type: integer
+            required: [query]
+
+        - name: get-myself
+          method: GET
+          path: /rest/api/3/myself
+          description: Get the authenticated user (accountId, display name, timezone).
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties: {}
+
+    # ── Jira Agile (Software) API ──
+    - namespace: jira
+      name: agile-api
+      description: >
+        Jira Software Agile API: boards, sprints, backlog, and epics.
+      baseUrl: "${{ vars.JIRA_BASE_URL }}"
+      auth:
+        type: basic
+        secret: "{{JIRA_CREDENTIALS}}"
+      headers:
+        Content-Type: application/json
+        Accept: application/json
+      retry:
+        maxAttempts: 3
+        backoff: exponential
+      timeoutSeconds: 30
+      operations:
+        - name: list-boards
+          method: GET
+          path: /rest/agile/1.0/board
+          description: List boards, optionally filtered by project or type (scrum/kanban).
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties:
+              projectKeyOrId:
+                type: string
+              type:
+                type: string
+                description: '"scrum" or "kanban".'
+              name:
+                type: string
+                description: Filter boards by name fragment.
+              startAt:
+                type: integer
+              maxResults:
+                type: integer
+
+        - name: list-sprints
+          method: GET
+          path: /rest/agile/1.0/board/{{ boardId }}/sprint
+          description: List sprints on a board, filterable by state (active, future, closed).
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              boardId:
+                type: integer
+              state:
+                type: string
+                description: Comma-separated states, e.g. "active,future".
+              startAt:
+                type: integer
+              maxResults:
+                type: integer
+            required: [boardId]
+
+        - name: get-sprint-issues
+          method: GET
+          path: /rest/agile/1.0/sprint/{{ sprintId }}/issue
+          description: List issues in a sprint, optionally narrowed with JQL.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              sprintId:
+                type: integer
+              jql:
+                type: string
+              fields:
+                type: string
+                description: Comma-separated field names.
+              startAt:
+                type: integer
+              maxResults:
+                type: integer
+            required: [sprintId]
+
+        - name: get-backlog-issues
+          method: GET
+          path: /rest/agile/1.0/board/{{ boardId }}/backlog
+          description: List backlog issues of a board, optionally narrowed with JQL.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              boardId:
+                type: integer
+              jql:
+                type: string
+              fields:
+                type: string
+              startAt:
+                type: integer
+              maxResults:
+                type: integer
+            required: [boardId]
+
+        - name: list-epics
+          method: GET
+          path: /rest/agile/1.0/board/{{ boardId }}/epic
+          description: List epics on a board.
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              boardId:
+                type: integer
+              done:
+                type: boolean
+                description: Filter by done state.
+              startAt:
+                type: integer
+              maxResults:
+                type: integer
+            required: [boardId]
+
+        - name: move-issues-to-sprint
+          method: POST
+          path: /rest/agile/1.0/sprint/{{ sprintId }}/issue
+          description: Move up to 50 issues into a sprint.
+          requestBodyMapping: path_and_json
+          parameters:
+            type: object
+            properties:
+              sprintId:
+                type: integer
+              issues:
+                type: array
+                items: { type: string }
+                description: Issue keys or ids, e.g. ["PROJ-1", "PROJ-2"].
+            required: [sprintId, issues]
+
+        - name: move-issues-to-backlog
+          method: POST
+          path: /rest/agile/1.0/backlog/issue
+          description: Move up to 50 issues out of their sprint back to the backlog.
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              issues:
+                type: array
+                items: { type: string }
+                description: Issue keys or ids.
+            required: [issues]
+
+  # ─────────────────────────────────────────────
+  # Webhooks (inbound: register the URL in Jira admin → System → Webhooks)
+  # ─────────────────────────────────────────────
+  webhooks:
+    - path: jira/events
+      targetType: agent
+      agentName: jira/assistant
+      description: >
+        Receives Jira webhooks (issue created/updated, comment added) and
+        forwards them to the assistant, one conversation per issue.
+      httpMethod: POST
+      requiresAuth: false
+      responseMode: async
+      dedup:
+        key: "header:X-Atlassian-Webhook-Identifier"
+        ttlSeconds: 3600
+      # Guarded with `is defined` per section: one undefined variable makes
+      # the runtime fall back to the raw JSON payload as the message.
+      messageTemplate: |
+        [Jira event: {{ webhookEvent if webhookEvent is defined else 'unknown' }}]
+        {% if issue is defined %}Issue {{ issue.key }}: {{ issue.fields.summary }}
+        Status: {{ issue.fields.status.name }}
+        {% endif %}{% if user is defined %}Actor: {{ user.displayName }}
+        {% endif %}{% if comment is defined %}Comment: {{ comment.body }}
+        {% endif %}Act on this event according to your triage instructions; if no
+        action is needed, briefly note why.
+      sessionKeyTemplate: "jira-{% if issue is defined %}{{ issue.key }}{% endif %}"
+
+  # ─────────────────────────────────────────────
+  # Skills
+  # ─────────────────────────────────────────────
+  skills:
+    - namespace: jira
+      name: jql-guide
+      description: >
+        JQL (Jira Query Language) reference: syntax, fields, operators,
+        functions, and ready-made recipes for search and worklog queries.
+      content: |
+        # JQL Guide
+
+        JQL clauses combine with AND / OR / NOT, ordered with ORDER BY.
+        Strings with spaces need quotes: status = "In Progress".
+
+        ## Common fields
+
+        project, status, statusCategory, issuetype, assignee, reporter,
+        priority, labels, component, fixVersion, sprint, created, updated,
+        due, resolution, summary, description, parent, worklogAuthor,
+        worklogDate
+
+        ## Operators
+
+        =, !=, >, >=, <, <=, IN, NOT IN, ~ (contains, for text fields),
+        IS EMPTY / IS NOT EMPTY, WAS, CHANGED
+
+        ## Useful functions
+
+        - currentUser() — the authenticated user
+        - startOfDay(), startOfWeek(), startOfMonth() — accept offsets:
+          startOfWeek(-1) = start of last week
+        - endOfDay(), endOfWeek(), endOfMonth()
+        - now(), openSprints(), closedSprints()
+        - Relative durations: -7d, -4w, -1h (e.g. updated >= -7d)
+
+        ## Recipes
+
+        My open issues:
+          assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC
+
+        Recently updated in a project:
+          project = PROJ AND updated >= -7d ORDER BY updated DESC
+
+        Unassigned bugs by priority:
+          project = PROJ AND issuetype = Bug AND assignee IS EMPTY
+          ORDER BY priority DESC
+
+        Issues in the active sprint:
+          project = PROJ AND sprint IN openSprints()
+
+        Overdue:
+          due < now() AND statusCategory != Done
+
+        Issues I logged time on this week:
+          worklogAuthor = currentUser() AND worklogDate >= startOfWeek()
+
+        Text search:
+          text ~ "payment timeout" ORDER BY updated DESC
+
+        ## Pitfalls
+
+        - statusCategory (To Do / In Progress / Done) is portable across
+          projects; literal status names often are not.
+        - worklogDate filters ISSUES having matching worklogs — after
+          searching, read each issue's worklogs and filter by author/date
+          again to compute totals.
+        - Reserved words and spaces must be quoted.
+
+    - namespace: jira
+      name: adf-guide
+      description: >
+        Atlassian Document Format (ADF) reference for issue descriptions,
+        comments, and worklog comments in the REST v3 API.
+      content: |
+        # ADF (Atlassian Document Format) Guide
+
+        Jira REST v3 requires rich-text fields (description, comment bodies,
+        worklog comments) to be ADF documents — plain strings are rejected.
+
+        ## Minimal document
+
+        ```json
+        {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [{ "type": "text", "text": "Hello world" }]
+            }
+          ]
+        }
+        ```
+
+        ## Common nodes
+
+        Bold / italic / code marks on text:
+        ```json
+        { "type": "text", "text": "important", "marks": [{ "type": "strong" }] }
+        ```
+        Mark types: strong, em, code, strike, underline, link
+        (link: { "type": "link", "attrs": { "href": "https://..." } })
+
+        Bullet list:
+        ```json
+        {
+          "type": "bulletList",
+          "content": [
+            { "type": "listItem", "content": [
+              { "type": "paragraph", "content": [{ "type": "text", "text": "item" }] }
+            ]}
+          ]
+        }
+        ```
+        (orderedList works the same way)
+
+        Heading:
+        ```json
+        { "type": "heading", "attrs": { "level": 3 },
+          "content": [{ "type": "text", "text": "Section" }] }
+        ```
+
+        Code block:
+        ```json
+        { "type": "codeBlock", "attrs": { "language": "python" },
+          "content": [{ "type": "text", "text": "print('hi')" }] }
+        ```
+
+        Mention a user (needs accountId from search-users):
+        ```json
+        { "type": "mention", "attrs": { "id": "<accountId>", "text": "@Name" } }
+        ```
+
+        ## Pitfalls
+
+        - Always "version": 1 at the doc root.
+        - text nodes cannot be empty strings.
+        - Paragraphs contain text/mention nodes; lists contain listItems
+          which contain paragraphs — skipping levels is rejected.
+        - Keep it simple: paragraphs, lists, headings, code blocks cover
+          nearly everything an agent needs to write.
+
+  # ─────────────────────────────────────────────
+  # Agents
+  # ─────────────────────────────────────────────
+  agents:
+    - namespace: jira
+      name: assistant
+      description: >
+        General Jira assistant: search and read issues, create and update
+        them, comment, transition, manage links, and work with boards,
+        sprints, and backlog.
+      temperature: 0.2
+      enabledConnectors:
+        - connector: jira/platform-api
+          operations:
+            - search-issues
+            - get-issue
+            - create-issue
+            - edit-issue
+            - assign-issue
+            - get-transitions
+            - transition-issue
+            - get-comments
+            - add-comment
+            - get-issue-link-types
+            - create-issue-link
+            - list-projects
+            - get-project
+            - get-project-components
+            - get-project-versions
+            - get-issue-types-for-project
+            - get-fields
+            - search-users
+            - get-myself
+        - connector: jira/agile-api
+          operations:
+            - list-boards
+            - list-sprints
+            - get-sprint-issues
+            - get-backlog-issues
+            - list-epics
+            - move-issues-to-sprint
+            - move-issues-to-backlog
+      enabledSkills:
+        - skill: jira/jql-guide
+          preload: false
+        - skill: jira/adf-guide
+          preload: false
+      systemPrompt: |
+        You are a Jira assistant working against the user's Jira Cloud site.
+
+        Workflow:
+        - To find issues, use search-issues with JQL. Fetch the jira/jql-guide
+          skill before writing non-trivial JQL.
+        - Before creating or editing issues with rich text (description,
+          comments), fetch the jira/adf-guide skill — Jira v3 requires ADF
+          documents, plain strings are rejected.
+        - Before create-issue, check get-issue-types-for-project so the
+          issuetype is valid. Resolve people to accountIds via search-users.
+        - Before transition-issue, call get-transitions to get valid ids.
+        - For sprint/backlog work, resolve the board with list-boards first.
+
+        Rules:
+        - Confirm with the user before creating, editing, transitioning, or
+          linking issues — show what you are about to change.
+        - Always mention issue keys (PROJ-123) in your answers.
+        - Keep JQL results small: request only the fields you need and use
+          maxResults sensibly (10-50).
+
+    - namespace: jira
+      name: hours-tracker
+      description: >
+        Conversational time tracking on Jira issues: log hours, review and
+        correct worklogs, and summarize time spent per issue, day, or week.
+      temperature: 0.1
+      enabledConnectors:
+        - connector: jira/platform-api
+          operations:
+            - search-issues
+            - get-issue
+            - get-worklogs
+            - add-worklog
+            - update-worklog
+            - delete-worklog
+            - get-myself
+      enabledSkills:
+        - skill: jira/jql-guide
+          preload: false
+      systemPrompt: |
+        You help the user track time on Jira issues conversationally, e.g.
+        "log 2h on PROJ-12 for yesterday morning" or "how many hours did I
+        log this week?".
+
+        Logging time:
+        - Resolve vague issue references by searching (search-issues) and
+          confirming the key with the user.
+        - Use timeSpentSeconds (e.g. 2h30m = 9000) and a started timestamp
+          formatted like "2026-07-22T09:00:00.000+0000". Call get-myself
+          once per conversation to learn the user's timezone and use it.
+        - If the user gives only a day, default started to 09:00 local time.
+        - Confirm issue key, duration, and date before calling add-worklog.
+          Report the created worklog id so entries can be corrected later.
+
+        Reviewing time:
+        - Find issues worked on via JQL: worklogAuthor = currentUser() AND
+          worklogDate >= startOfWeek() (fetch jira/jql-guide for variants).
+        - Then call get-worklogs per issue and filter entries by the user's
+          accountId (from get-myself) and the date range — worklogDate JQL
+          only filters issues, not individual entries.
+        - Summarize as a compact table: issue key, summary, hours per day,
+          total. Convert seconds to hours with one decimal.
+
+        Corrections:
+        - Use update-worklog / delete-worklog only on entries you have just
+          shown the user, and confirm before deleting.

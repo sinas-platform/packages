@@ -1,0 +1,441 @@
+apiVersion: sinas.co/v1
+kind: SinasPackage
+package:
+  name: gmail
+  version: "0.1.0"
+  description: >
+    Gmail integration: Gmail API v1 connector with per-user OAuth, search
+    and message-format skills, and an inbox assistant for triage,
+    summarizing, labeling, and drafting replies.
+  author: Sinas
+  url: https://github.com/sinas-platform/sinas-packages
+
+spec:
+  # ─────────────────────────────────────────────
+  # Install-time variables
+  # ─────────────────────────────────────────────
+  variables:
+    - name: GMAIL_CLIENT_ID
+      type: text
+      description: >
+        OAuth client ID of your Google Cloud project (may be the same one
+        used for the google-calendar package).
+      required: true
+
+    - name: GMAIL_CLIENT_SECRET
+      type: secret
+      description: >
+        OAuth client secret. Use the same value as GOOGLE_CLIENT_SECRET if
+        you installed google-calendar with the same Google Cloud app; the
+        name differs so each package manages its own secret lifecycle.
+      required: true
+
+  # ─────────────────────────────────────────────
+  # Connector
+  # ─────────────────────────────────────────────
+  connectors:
+    - namespace: gmail
+      name: gmail-api
+      description: >
+        Gmail API v1: search, read messages and threads, labels, archive/
+        trash, drafts, and send. Each user connects their own account via
+        OAuth.
+      baseUrl: https://gmail.googleapis.com
+      auth:
+        type: oauth2_authorization_code
+        authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth?access_type=offline&prompt=consent"
+        tokenUrl: https://oauth2.googleapis.com/token
+        clientId: "${{ vars.GMAIL_CLIENT_ID }}"
+        secret: "{{GMAIL_CLIENT_SECRET}}"
+        scopes:
+          - https://www.googleapis.com/auth/gmail.modify
+      headers:
+        Accept: application/json
+      retry:
+        maxAttempts: 3
+        backoff: exponential
+      timeoutSeconds: 30
+      operations:
+        - name: get-profile
+          method: GET
+          path: /gmail/v1/users/me/profile
+          description: Get the user's email address, total message count, and current historyId.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties: {}
+
+        - name: search-messages
+          method: GET
+          path: /gmail/v1/users/me/messages
+          description: >
+            Search messages with Gmail query syntax (q). Returns message ids
+            only — follow up with get-message. Fetch the gmail/search-operators
+            skill for the query language.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties:
+              q:
+                type: string
+                description: 'Gmail search query, e.g. "in:inbox is:unread newer_than:2d".'
+              maxResults:
+                type: integer
+                description: Max ids to return (keep to 10-25).
+              pageToken:
+                type: string
+            required: [q]
+
+        - name: get-message
+          method: GET
+          path: /gmail/v1/users/me/messages/{{ messageId }}
+          description: >
+            Get a message. Use format=metadata with metadataHeaders for
+            triage (cheap); format=full for the body (fetch the
+            gmail/message-format skill to decode the payload).
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              messageId:
+                type: string
+              format:
+                type: string
+                description: '"metadata", "full", or "minimal".'
+              metadataHeaders:
+                type: array
+                items: { type: string }
+                description: 'Headers to include with format=metadata, e.g. ["From", "Subject", "Date"].'
+            required: [messageId]
+
+        - name: list-threads
+          method: GET
+          path: /gmail/v1/users/me/threads
+          description: Search threads (same q syntax). Returns thread ids; follow up with get-thread.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties:
+              q:
+                type: string
+              maxResults:
+                type: integer
+              pageToken:
+                type: string
+            required: [q]
+
+        - name: get-thread
+          method: GET
+          path: /gmail/v1/users/me/threads/{{ threadId }}
+          description: Get all messages in a thread (format=metadata recommended for summaries).
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              threadId:
+                type: string
+              format:
+                type: string
+                description: '"metadata", "full", or "minimal".'
+              metadataHeaders:
+                type: array
+                items: { type: string }
+            required: [threadId]
+
+        - name: list-labels
+          method: GET
+          path: /gmail/v1/users/me/labels
+          description: List all labels (system and user) with their ids.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties: {}
+
+        - name: create-label
+          method: POST
+          path: /gmail/v1/users/me/labels
+          description: Create a user label.
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              name:
+                type: string
+                description: Label name; use "/" for nesting, e.g. "Clients/Acme".
+              labelListVisibility:
+                type: string
+                description: '"labelShow" (default) or "labelHide".'
+              messageListVisibility:
+                type: string
+                description: '"show" (default) or "hide".'
+            required: [name]
+
+        - name: modify-message
+          method: POST
+          path: /gmail/v1/users/me/messages/{{ messageId }}/modify
+          description: >
+            Add/remove labels on a message. Archive = remove INBOX; mark
+            read = remove UNREAD; star = add STARRED.
+          requestBodyMapping: path_and_json
+          parameters:
+            type: object
+            properties:
+              messageId:
+                type: string
+              addLabelIds:
+                type: array
+                items: { type: string }
+              removeLabelIds:
+                type: array
+                items: { type: string }
+            required: [messageId]
+
+        - name: trash-message
+          method: POST
+          path: /gmail/v1/users/me/messages/{{ messageId }}/trash
+          description: Move a message to trash (reversible; auto-deletes after 30 days).
+          requestBodyMapping: path_and_query
+          parameters:
+            type: object
+            properties:
+              messageId:
+                type: string
+            required: [messageId]
+
+        - name: create-draft
+          method: POST
+          path: /gmail/v1/users/me/drafts
+          description: >
+            Create a draft. message.raw is a base64url-encoded RFC 2822
+            message — build it with code execution (see the
+            gmail/message-format skill). Include threadId to draft a reply.
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              message:
+                type: object
+                description: '{"raw": "<base64url RFC2822>", "threadId": "optional-thread-id"}'
+            required: [message]
+
+        - name: list-drafts
+          method: GET
+          path: /gmail/v1/users/me/drafts
+          description: List drafts.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties:
+              maxResults:
+                type: integer
+              q:
+                type: string
+
+        - name: send-message
+          method: POST
+          path: /gmail/v1/users/me/messages/send
+          description: >
+            Send an email immediately. raw is a base64url-encoded RFC 2822
+            message; include threadId to reply in-thread. Prefer
+            create-draft so the user reviews before sending.
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              raw:
+                type: string
+                description: base64url-encoded RFC 2822 message.
+              threadId:
+                type: string
+            required: [raw]
+
+        - name: list-history
+          method: GET
+          path: /gmail/v1/users/me/history
+          description: >
+            List mailbox changes since a historyId (from get-profile or a
+            previous call). Basis for incremental polling.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties:
+              startHistoryId:
+                type: string
+              historyTypes:
+                type: array
+                items: { type: string }
+                description: 'e.g. ["messageAdded"].'
+              labelId:
+                type: string
+                description: Only changes affecting this label (e.g. INBOX).
+              maxResults:
+                type: integer
+              pageToken:
+                type: string
+            required: [startHistoryId]
+
+  # ─────────────────────────────────────────────
+  # Skills
+  # ─────────────────────────────────────────────
+  skills:
+    - namespace: gmail
+      name: search-operators
+      description: >
+        Gmail search query syntax: operators, date filters, label logic,
+        and ready-made triage queries.
+      content: |
+        # Gmail Search Operators
+
+        Operators combine with spaces (AND), OR, and - (NOT).
+        Group with parentheses: (from:a@b.com OR from:c@d.com).
+
+        ## Core operators
+
+        - from: / to: / cc: — addresses or name fragments
+        - subject:word — subject contains
+        - "exact phrase" — quoted phrase anywhere
+        - in:inbox, in:sent, in:trash, in:anywhere
+        - is:unread, is:read, is:starred, is:important
+        - label:name — user label (nested: label:clients-acme)
+        - category:primary / promotions / social / updates
+        - has:attachment, filename:pdf, larger:5M
+        - newer_than:2d / 7d / 1m, older_than:1y
+        - after:2026/07/01, before:2026/07/22
+
+        ## Recipes
+
+        Unread inbox, recent:
+          in:inbox is:unread newer_than:2d
+
+        Needs-reply candidates (primary tab, not from me):
+          in:inbox category:primary is:unread -from:me
+
+        From a person, with attachments:
+          from:sam@company.com has:attachment newer_than:1m
+
+        Invoices:
+          (subject:invoice OR subject:receipt) newer_than:3m
+
+        ## Notes
+
+        - search-messages returns only ids — batch follow-up get-message
+          calls with format=metadata to triage cheaply.
+        - Searches match whole words; there is no substring matching.
+
+    - namespace: gmail
+      name: message-format
+      description: >
+        Gmail message payload structure (MIME tree, base64url bodies) and
+        how to build RFC 2822 raw messages for drafts and sending.
+      content: |
+        # Gmail Message Format
+
+        ## Reading (format=full)
+
+        A message payload is a MIME tree:
+
+        - payload.headers — list of {name, value}: From, To, Subject, Date
+        - payload.mimeType "text/plain" or "text/html" → body in
+          payload.body.data (base64url)
+        - multipart/* → payload.parts[], each with its own mimeType/body;
+          prefer the text/plain part, fall back to text/html
+        - Attachments are parts with a filename and body.attachmentId
+          (content requires a separate attachments endpoint — not enabled
+          by default; report the filename and size instead)
+
+        Decode bodies with code execution:
+        ```python
+        import base64
+        text = base64.urlsafe_b64decode(data + "==").decode("utf-8", "replace")
+        ```
+        For HTML-only bodies, strip tags before summarizing.
+
+        Triage tip: format=metadata with
+        metadataHeaders=["From","To","Subject","Date"] plus the built-in
+        snippet field is enough for most summaries — only fetch full for
+        messages you must quote or analyze.
+
+        ## Writing (create-draft / send-message)
+
+        message.raw / raw is a base64url-encoded RFC 2822 message. Build it
+        with code execution:
+
+        ```python
+        import base64
+        from email.message import EmailMessage
+
+        msg = EmailMessage()
+        msg["To"] = "sam@company.com"
+        msg["Subject"] = "Re: Q3 planning"
+        msg["In-Reply-To"] = "<original-message-id-header>"
+        msg["References"] = "<original-message-id-header>"
+        msg.set_content("Body text here.")
+
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+        ```
+
+        For replies: pass threadId alongside raw, keep the subject
+        ("Re: ..."), and set In-Reply-To/References to the original
+        Message-ID header (from the message's payload.headers) so Gmail
+        threads it correctly. Gmail sets the From automatically.
+
+  # ─────────────────────────────────────────────
+  # Agents
+  # ─────────────────────────────────────────────
+  agents:
+    - namespace: gmail
+      name: assistant
+      description: >
+        Inbox assistant: search and summarize mail, triage and label,
+        archive, and prepare reply drafts for the user to review in Gmail.
+      temperature: 0.1
+      systemTools:
+        - codeExecution
+      enabledConnectors:
+        - connector: gmail/gmail-api
+          operations:
+            - get-profile
+            - search-messages
+            - get-message
+            - list-threads
+            - get-thread
+            - list-labels
+            - create-label
+            - modify-message
+            - trash-message
+            - create-draft
+            - list-drafts
+      enabledSkills:
+        - skill: gmail/search-operators
+          preload: false
+        - skill: gmail/message-format
+          preload: false
+      systemPrompt: |
+        You are an email assistant working on the user's Gmail account.
+
+        Reading and triage:
+        - Search with search-messages (fetch gmail/search-operators for
+          the query syntax), then get-message with format=metadata and
+          metadataHeaders=["From","To","Subject","Date"] — the snippet
+          plus headers is enough for triage. Only fetch format=full when
+          you must read the body; fetch gmail/message-format first and
+          decode base64url bodies with code execution.
+        - Present inbox summaries compactly: sender, subject, one-line
+          gist, age. Group by topic when it helps.
+
+        Acting on mail:
+        - Labels: resolve label names to ids via list-labels before
+          modify-message. Archive = remove INBOX. Confirm bulk actions
+          (more than ~5 messages) before executing.
+        - trash-message only on explicit user request, never in bulk
+          cleanups you inferred yourself.
+
+        Drafting:
+        - You prepare drafts; the user reviews and sends them in Gmail.
+          Build the RFC 2822 raw message with code execution per the
+          gmail/message-format skill, pass threadId and In-Reply-To for
+          replies, and show the user the exact text before creating the
+          draft.
+        - Match the user's tone from the thread; keep replies short.
+        - You cannot send mail directly — if asked to send, create the
+          draft and tell the user it is ready to send in Gmail.
