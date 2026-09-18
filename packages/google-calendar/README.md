@@ -12,13 +12,7 @@ Google Calendar integration for Sinas with per-user OAuth: each user connects th
 
 ## Prerequisites (Google Cloud, one-time per instance)
 
-1. Create (or reuse) a Google Cloud project and enable the **Google Calendar API**.
-2. Configure the **OAuth consent screen** (external or internal; scope `https://www.googleapis.com/auth/calendar`).
-3. Create **OAuth credentials** of type *Web application* and add the redirect URI:
-   ```
-   https://<your-sinas-domain>/auth/connectors/oauth/callback
-   ```
-   (The redirect host comes from the Sinas `DOMAIN` env var.)
+Follow the shared [Google OAuth setup guide](../../GOOGLE-SETUP.md) — enable the **Google Calendar API**, add scope `https://www.googleapis.com/auth/calendar` to the consent screen, and create a *Web application* OAuth client whose redirect URI is `https://<DOMAIN>/auth/connectors/oauth/callback`. One OAuth client can serve this package alongside the Gmail and Drive & Docs packages.
 
 ## Install
 

@@ -50,9 +50,10 @@ packages/
     README.md        # Documentation
 ```
 
-## Authoring
+## Guides
 
-See [AUTHORING.md](AUTHORING.md) for the live-verified authoring guide: connector schema realities, webhook template guarding, pipeline cursor semantics, function runtime constraints, and the testing workflow.
+- [GOOGLE-SETUP.md](GOOGLE-SETUP.md) — one-time Google Cloud OAuth setup shared by the Calendar, Gmail and Drive & Docs packages: APIs, consent screen, redirect URI, per-user Connect, troubleshooting.
+- [AUTHORING.md](AUTHORING.md) — writing your own packages: connector schema realities, webhook template guarding, pipeline cursor semantics, function runtime constraints, and the testing workflow.
 
 ## Contributing
 

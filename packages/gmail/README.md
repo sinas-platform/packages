@@ -13,7 +13,7 @@ Gmail integration for Sinas with per-user OAuth. The `gmail/assistant` agent sea
 
 ## Prerequisites
 
-Same Google Cloud setup as [google-calendar](../google-calendar/): enable the **Gmail API**, add scope `https://www.googleapis.com/auth/gmail.modify` to the consent screen, and reuse the same Web-application OAuth credentials (redirect URI `https://<your-sinas-domain>/auth/connectors/oauth/callback`).
+Follow the shared [Google OAuth setup guide](../../GOOGLE-SETUP.md): enable the **Gmail API**, add scope `https://www.googleapis.com/auth/gmail.modify` to the consent screen, and reuse the same Web-application OAuth client as the other Google packages (redirect URI `https://<DOMAIN>/auth/connectors/oauth/callback`).
 
 | Variable | Type | Value |
 |---|---|---|

@@ -14,7 +14,7 @@ Google Drive and Docs integration for Sinas with per-user OAuth. The `gdrive/lib
 
 ## Prerequisites
 
-Same Google Cloud setup as the other Google packages: enable the **Google Drive API** and **Google Docs API**, add scope `https://www.googleapis.com/auth/drive` to the consent screen, reuse the Web-application OAuth credentials (redirect URI `https://<your-sinas-domain>/auth/connectors/oauth/callback`).
+Follow the shared [Google OAuth setup guide](../../GOOGLE-SETUP.md): enable **both** the **Google Drive API** and the **Google Docs API**, add scope `https://www.googleapis.com/auth/drive` to the consent screen, and reuse the same Web-application OAuth client as the other Google packages (redirect URI `https://<DOMAIN>/auth/connectors/oauth/callback`).
 
 | Variable | Type | Value |
 |---|---|---|
