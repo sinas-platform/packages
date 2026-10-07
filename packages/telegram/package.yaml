@@ -1,0 +1,451 @@
+apiVersion: sinas.co/v1
+kind: SinasPackage
+package:
+  name: telegram
+  version: "0.1.0"
+  description: >
+    Telegram Bot API integration: connector for sending and managing
+    messages, bot-basics skill, and a notifier agent. Inbound messages
+    arrive in a later version (pending platform webhook features).
+  author: Sinas
+  url: https://github.com/sinas-platform/sinas-packages
+
+spec:
+  # ─────────────────────────────────────────────
+  # Install-time variables
+  # ─────────────────────────────────────────────
+  variables:
+    - name: TELEGRAM_BOT_TOKEN
+      type: text
+      description: >
+        Bot token from @BotFather (123456:ABC-...). NOTE: the Telegram API
+        embeds the token in the URL path, so it is stored in the connector
+        config (not as an encrypted secret) — treat instance config access
+        accordingly.
+      required: true
+
+    - name: TELEGRAM_WEBHOOK_PATH
+      type: text
+      description: >
+        Webhook path for inbound Telegram updates. Include a random slug as
+        the auth mechanism (headers are not verifiable), e.g.
+        "telegram/updates-x7k2m9pq".
+      default: telegram/updates
+      required: true
+
+    - name: SINAS_INTERNAL_URL
+      type: text
+      description: >
+        Base URL where function containers reach the Sinas API (used by the
+        optional polling pipeline to invoke the agent).
+      default: http://host.docker.internal:8000
+      required: true
+
+  # ─────────────────────────────────────────────
+  # Connector
+  # ─────────────────────────────────────────────
+  connectors:
+    - namespace: telegram
+      name: bot-api
+      description: >
+        Telegram Bot API: send/edit messages, chat info, webhook
+        management, and update polling. Auth is the bot token embedded in
+        the base URL (Telegram's scheme).
+      baseUrl: "https://api.telegram.org/bot${{ vars.TELEGRAM_BOT_TOKEN }}"
+      auth:
+        type: none
+      headers:
+        Content-Type: application/json
+      retry:
+        maxAttempts: 3
+        backoff: exponential
+      timeoutSeconds: 30
+      operations:
+        - name: get-me
+          method: GET
+          path: /getMe
+          description: Get the bot's own identity — also the quickest connectivity/token check.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties: {}
+
+        - name: send-message
+          method: POST
+          path: /sendMessage
+          description: >
+            Send a message to a chat. Use parse_mode HTML (fetch the
+            telegram/bot-basics skill for supported tags — MarkdownV2
+            escaping is a trap).
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              chat_id:
+                type: integer
+                description: Target chat id (user id for DMs; negative for groups).
+              text:
+                type: string
+                description: Message text (HTML formatting when parse_mode=HTML).
+              parse_mode:
+                type: string
+                description: '"HTML" recommended.'
+              reply_to_message_id:
+                type: integer
+              disable_notification:
+                type: boolean
+                description: Send silently.
+            required: [chat_id, text]
+
+        - name: edit-message
+          method: POST
+          path: /editMessageText
+          description: Edit the text of a message previously sent by this bot.
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              chat_id:
+                type: integer
+              message_id:
+                type: integer
+              text:
+                type: string
+              parse_mode:
+                type: string
+            required: [chat_id, message_id, text]
+
+        - name: send-photo
+          method: POST
+          path: /sendPhoto
+          description: Send a photo by public URL (no file upload support).
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              chat_id:
+                type: integer
+              photo:
+                type: string
+                description: Public HTTPS URL of the image.
+              caption:
+                type: string
+            required: [chat_id, photo]
+
+        - name: send-chat-action
+          method: POST
+          path: /sendChatAction
+          description: Show a status indicator in the chat (e.g. "typing") while composing a longer answer.
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              chat_id:
+                type: integer
+              action:
+                type: string
+                description: '"typing", "upload_photo", ...'
+            required: [chat_id, action]
+
+        - name: get-chat
+          method: GET
+          path: /getChat
+          description: Get info about a chat (title, type, description) by id.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties:
+              chat_id:
+                type: integer
+            required: [chat_id]
+
+        - name: get-updates
+          method: GET
+          path: /getUpdates
+          description: >
+            Poll for incoming updates (messages sent to the bot). offset is
+            the cursor: pass last update_id + 1. Mutually exclusive with an
+            active webhook.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties:
+              offset:
+                type: integer
+                description: last processed update_id + 1.
+              limit:
+                type: integer
+              timeout:
+                type: integer
+                description: Long-poll seconds (0 for immediate return).
+
+        - name: set-webhook
+          method: POST
+          path: /setWebhook
+          description: >
+            Point Telegram at an HTTPS endpoint for incoming updates
+            (disables getUpdates polling). secret_token is echoed by
+            Telegram in a header on each delivery.
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              url:
+                type: string
+                description: Public HTTPS endpoint to receive updates.
+              secret_token:
+                type: string
+                description: 1-256 chars; Telegram sends it as X-Telegram-Bot-Api-Secret-Token.
+              allowed_updates:
+                type: array
+                items: { type: string }
+                description: 'e.g. ["message"].'
+            required: [url]
+
+        - name: delete-webhook
+          method: POST
+          path: /deleteWebhook
+          description: Remove the webhook (re-enables getUpdates polling).
+          requestBodyMapping: json
+          parameters:
+            type: object
+            properties:
+              drop_pending_updates:
+                type: boolean
+
+        - name: get-webhook-info
+          method: GET
+          path: /getWebhookInfo
+          description: Inspect current webhook status, pending update count, and last error.
+          requestBodyMapping: query
+          parameters:
+            type: object
+            properties: {}
+
+  # ─────────────────────────────────────────────
+  # Inbound option B: polling pipeline (no public URL needed)
+  #
+  # Disabled by default — enable BOTH the pipeline and the schedule to use
+  # polling mode. Mutually exclusive on Telegram's side with a registered
+  # webhook: getUpdates returns 409 while one is set (delete-webhook first).
+  # ─────────────────────────────────────────────
+  functions:
+    - namespace: telegram
+      name: poll_updates
+      description: >
+        Poll Telegram getUpdates from the pipeline cursor (offset), invoke
+        the notifier agent per message (one conversation per chat), and
+        return next_offset (= max update_id + 1) as the new cursor.
+      sharedPool: true
+      timeout: 300
+      inputSchema:
+        type: object
+        properties:
+          offset:
+            type: string
+            description: Pipeline cursor — last confirmed update_id + 1.
+      code: |
+        def handler(input_data, context):
+            import requests
+
+            base = "https://api.telegram.org/bot${{ vars.TELEGRAM_BOT_TOKEN }}"
+            offset = input_data.get("offset")
+
+            params = {"timeout": 0, "allowed_updates": '["message"]'}
+            if offset not in (None, ""):
+                params["offset"] = int(offset)
+
+            resp = requests.get(f"{base}/getUpdates", params=params, timeout=20).json()
+            if not resp.get("ok"):
+                raise Exception(f"getUpdates failed: {resp.get('description')}")
+
+            updates = resp["result"]
+            next_offset = int(offset) if offset not in (None, "") else 0
+            processed = skipped = 0
+
+            for u in updates:
+                next_offset = max(next_offset, u["update_id"] + 1)
+                msg = u.get("message")
+                if not msg or not msg.get("chat"):
+                    skipped += 1
+                    continue
+                chat_id = msg["chat"]["id"]
+                sender = (msg.get("from") or {}).get("first_name", "unknown")
+                text = msg.get("text") or "(non-text message)"
+                r = requests.post(
+                    "${{ vars.SINAS_INTERNAL_URL }}/agents/telegram/notifier/invoke",
+                    headers={"Authorization": "Bearer " + context["access_token"]},
+                    json={
+                        "message": f"[Telegram message from {sender} (chat_id {chat_id})]\n{text}",
+                        "session_key": f"tg-{chat_id}",
+                    },
+                    timeout=280,
+                )
+                r.raise_for_status()
+                processed += 1
+
+            return {
+                "processed": processed,
+                "skipped": skipped,
+                "updates_seen": len(updates),
+                "next_offset": next_offset,
+            }
+
+  pipelines:
+    - namespace: telegram
+      name: poll-inbox
+      description: >
+        Inbound Telegram without a public URL: polls getUpdates on a
+        durable cursor and routes each message to the notifier agent.
+        Enable together with the telegram-poll-inbox schedule.
+      isActive: false
+      concurrency: single
+      disableAfterFailures: 10
+      steps:
+        - name: poll
+          type: function
+          function: telegram/poll_updates
+          cursor:
+            param: offset
+            # JMESPath over the RUN context (not the step output):
+            path: steps.poll.output.next_offset
+
+  schedules:
+    - name: telegram-poll-inbox
+      scheduleType: pipeline
+      pipelineName: telegram/poll-inbox
+      description: Drives the telegram/poll-inbox polling pipeline. Enable together with the pipeline.
+      cronExpression: "* * * * *"
+      isActive: false
+
+  # ─────────────────────────────────────────────
+  # Webhooks (inbound option A: point Telegram here via set-webhook)
+  # ─────────────────────────────────────────────
+  webhooks:
+    - path: "${{ vars.TELEGRAM_WEBHOOK_PATH }}"
+      targetType: agent
+      agentName: telegram/notifier
+      description: >
+        Receives Telegram updates and forwards messages to the agent, one
+        conversation per chat. Wire it with set-webhook pointing at
+        https://<instance>/webhooks/<this path>.
+      httpMethod: POST
+      requiresAuth: false
+      responseMode: async
+      dedup:
+        key: "$.update_id"
+        ttlSeconds: 3600
+      # Guarded with `is defined`: one undefined variable makes the runtime
+      # fall back to the raw JSON payload as the message (e.g. photo messages
+      # have no .text; edited_message updates have no .message at all).
+      messageTemplate: |
+        {% if message is defined %}[Telegram message from {{ message.from.first_name if message.from is defined else 'unknown' }} (chat_id {{ message.chat.id }})]
+        {{ message.text if message.text is defined else '(non-text message)' }}
+        {% else %}[Telegram update without a message payload — likely an edit, callback, or membership change. Usually no action needed.]
+        {% endif %}
+      sessionKeyTemplate: "tg-{% if message is defined %}{{ message.chat.id }}{% endif %}"
+
+  # ─────────────────────────────────────────────
+  # Skills
+  # ─────────────────────────────────────────────
+  skills:
+    - namespace: telegram
+      name: bot-basics
+      description: >
+        Telegram Bot API essentials: chat ids, HTML formatting, replying,
+        webhook vs polling, and response conventions.
+      content: |
+        # Telegram Bot Basics
+
+        ## chat_id
+
+        - DM with a user: chat_id = the user's numeric id. A bot CANNOT
+          message a user who has never started a chat with it.
+        - Groups/supergroups: negative ids (e.g. -1001234567890).
+        - Discover ids from incoming updates (message.chat.id) or ask the
+          user to message the bot once.
+
+        ## Formatting: use parse_mode=HTML
+
+        MarkdownV2 requires escaping 18 different characters — avoid it.
+        Supported HTML tags:
+        - <b>bold</b>, <i>italic</i>, <u>underline</u>, <s>strike</s>
+        - <code>inline</code>, <pre>block</pre>
+        - <a href="https://example.com">link</a>
+        - NO headers, lists, or tables — use plain lines with "•" and
+          blank lines for structure.
+        Escape literal <, >, & in text as &lt; &gt; &amp;.
+
+        ## Replies & message ids
+
+        - Every sent/received message has message_id (integer, per chat).
+        - reply_to_message_id quotes the original — use it in groups so
+          context is clear.
+        - editMessageText only works on the bot's OWN messages.
+
+        ## Responses & errors
+
+        - Every response is {"ok": true, "result": ...} or {"ok": false,
+          "error_code", "description"} — check "ok".
+        - 403 "bot was blocked by the user" — the user must unblock/restart
+          the chat; report it, don't retry.
+        - Rate limits: ~30 messages/second overall, 1/second per chat —
+          space out bulk notifications.
+
+        ## Inbound: webhook vs polling
+
+        - setWebhook and getUpdates are mutually exclusive; check
+          get-webhook-info when polling returns nothing.
+        - Webhook deliveries include the secret_token in the
+          X-Telegram-Bot-Api-Secret-Token header; update_id is the dedup
+          key for retries.
+        - Bots never receive their own outgoing messages (no echo-loop
+          risk).
+
+  # ─────────────────────────────────────────────
+  # Agents
+  # ─────────────────────────────────────────────
+  agents:
+    - namespace: telegram
+      name: notifier
+      description: >
+        Sends and manages Telegram messages via the bot: notifications,
+        formatted reports, and message edits.
+      temperature: 0.1
+      enabledConnectors:
+        - connector: telegram/bot-api
+          operations:
+            - get-me
+            - send-message
+            - edit-message
+            - send-photo
+            - send-chat-action
+            - get-chat
+      enabledSkills:
+        - skill: telegram/bot-basics
+          preload: true
+      systemPrompt: |
+        You send messages through the user's Telegram bot.
+
+        - Always use parse_mode HTML with only the tags listed in the
+          bot-basics skill; escape literal <, >, & in content.
+        - You need a numeric chat_id to send anything. If the user gives a
+          name instead of an id, explain how to find it (the recipient
+          must have started a chat with the bot) — never guess ids.
+        - Show the exact message text and target chat before sending;
+          confirm before sending to any chat_id used for the first time
+          in this conversation.
+        - Check "ok" in every response; on ok=false explain error_code and
+          description (403 usually means the recipient blocked the bot or
+          never started it).
+        - For bulk notifications, respect rate limits: one message per
+          second per chat.
+
+        Inbound messages:
+        - When you receive a message starting with "[Telegram message
+          from ...]", someone wrote to the bot. Reply by calling
+          send-message to the chat_id given in that header line — your
+          conversational reply is NOT delivered automatically. Keep
+          replies short, use HTML formatting, and skip the send
+          confirmation rule for these replies (the recipient is the
+          person who just messaged you).

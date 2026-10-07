@@ -2,7 +2,7 @@ apiVersion: sinas.co/v1
 kind: SinasPackage
 package:
   name: sinas-package-author
-  version: "0.3.0"
+  version: "0.4.0"
   description: >
     Skills + reference agent for authoring Sinas Packages. Split into focused
     skills: schema/workflow (preloaded), plus on-demand patterns for functions,
@@ -413,89 +413,136 @@ spec:
     - namespace: sinas
       name: connector-patterns
       description: >
-        How to define HTTP API connectors: auth types, operations,
-        parameters, retry config, and agent wiring.
+        How to define HTTP API connectors: auth types (incl. OAuth 2.0),
+        operations, parameter schemas, request body mapping, retry config,
+        and agent wiring.
       content: |
         # Connector Patterns
 
         ## Full example
 
         ```yaml
-        - namespace: hubspot
-          name: crm-api
-          description: HubSpot CRM v3 API
-          baseUrl: https://api.hubapi.com
+        - namespace: jira
+          name: platform-api
+          description: Jira Cloud Platform REST API v3
+          baseUrl: https://your-site.atlassian.net
           auth:
-            type: bearer
-            secret: "{{HUBSPOT_ACCESS_TOKEN}}"
+            type: basic
+            secret: "{{JIRA_CREDENTIALS}}"   # references a Sinas secret by name
           headers:
             Content-Type: application/json
           retry:
             maxAttempts: 3
-            backoff: exponential
+            backoff: exponential             # exponential | linear | none
           timeoutSeconds: 30
           operations:
-            - name: search-deals
+            - name: search-issues
               method: POST
-              path: /crm/v3/objects/deals/search
-              description: Search deals with filters and sorts
+              path: /rest/api/3/search/jql
+              description: Search issues with a JQL query.
+              requestBodyMapping: json
               parameters:
-                - name: body
-                  in: body
-                  schema:
-                    type: object
-                    properties:
-                      filterGroups:
-                        type: array
-                      sorts:
-                        type: array
-                      limit:
-                        type: integer
-                      properties:
-                        type: array
-                        items:
-                          type: string
-            - name: get-deal
+                type: object
+                properties:
+                  jql:
+                    type: string
+                    description: JQL query string.
+                  maxResults:
+                    type: integer
+                required: [jql]
+            - name: get-issue
               method: GET
-              path: /crm/v3/objects/deals/{dealId}
-              description: Get a specific deal by ID
+              path: /rest/api/3/issue/{{ issueIdOrKey }}
+              description: Get a single issue by key or id.
+              requestBodyMapping: path_and_query
               parameters:
-                - name: dealId
-                  in: path
-                  schema:
+                type: object
+                properties:
+                  issueIdOrKey:
                     type: string
-                - name: properties
-                  in: query
-                  schema:
+                  fields:
                     type: string
-                    description: Comma-separated property names
+                    description: Comma-separated field names.
+                required: [issueIdOrKey]
         ```
-
-        ## Auth types
-
-        - `type: bearer` with `secret: "{{SECRET_NAME}}"` — references a
-          Sinas secret
-        - `type: apiKey` with `header`, `position` (`header`/`query`),
-          `paramName`
 
         ## Operations
 
-        Each operation has: `name`, `method`, `path`, `description`,
-        `parameters`.
+        - `parameters` is ONE flat JSON Schema object covering path, query,
+          and body params together. It is NOT an OpenAPI-style list with
+          `in:` entries.
+        - Path params use Jinja2 syntax in the path:
+          `/issue/{{ issueIdOrKey }}`. A parameter whose name appears in
+          the path template is rendered there. Always list path params in
+          `required`.
+        - `requestBodyMapping` routes the remaining (non-path) params:
+          - `json` — all params as JSON body (POST/PUT/PATCH)
+          - `query` — all params as query string
+          - `path_and_json` — path params in path, rest as JSON body
+          - `path_and_query` — path params in path, rest as query string
+          A GET never sends a body — use `query` or `path_and_query`.
+          There is no mixed query+body mapping; if an endpoint needs both,
+          prefer the body params and drop optional query params.
+        - `responseMapping`: `json` (default) or `text` for non-JSON
+          responses (e.g. exports).
 
-        Path parameters use `{paramName}` syntax.
+        ## Auth types
 
-        Parameter `in` values: `path`, `query`, `body`, `header`.
+        - `type: none`
+        - `type: bearer`, `secret: "{{SECRET_NAME}}"` —
+          `Authorization: Bearer <secret>`
+        - `type: basic`, `secret: "{{SECRET_NAME}}"` — secret value is
+          `user:password`, base64-encoded at request time
+        - `type: api_key`, `header: X-Api-Key` — or send as query param
+          with `position: query`, `paramName: key`
+        - `type: sinas_token` — forwards the caller's Sinas token
+        - `type: oauth2_client_credentials` — machine-to-machine:
+          ```yaml
+          auth:
+            type: oauth2_client_credentials
+            tokenUrl: https://provider.com/oauth/token
+            clientId: "${{ vars.CLIENT_ID }}"
+            secret: "{{CLIENT_SECRET}}"          # the OAuth client secret
+            scopes: [read, write]                # optional
+            clientAuthMethod: body               # body | basic
+            tokenParams: { audience: "..." }     # optional extra token params
+          ```
+        - `type: oauth2_authorization_code` — per-user "Connect your
+          account" (tokens stored per user, refreshed automatically;
+          users connect via the console popup):
+          ```yaml
+          auth:
+            type: oauth2_authorization_code
+            authorizeUrl: https://provider.com/oauth/authorize
+            tokenUrl: https://provider.com/oauth/token
+            clientId: "${{ vars.CLIENT_ID }}"
+            secret: "{{CLIENT_SECRET}}"
+            scopes: ["https://provider.com/scope.read"]
+          ```
+          Extra authorize-URL params can be baked into `authorizeUrl` as a
+          query string — e.g. Google needs
+          `...?access_type=offline&prompt=consent` to issue refresh tokens.
+          The redirect URI is `https://{DOMAIN}/auth/connectors/oauth/callback`.
+
+        ## OpenAPI import
+
+        For existing APIs the platform can extract operations from an
+        OpenAPI 3.x spec (`POST /api/v1/connectors/parse-openapi`, or
+        import directly onto a connector). Always curate the result: keep
+        only operations agents need and rewrite descriptions to be
+        agent-friendly — every operation becomes a tool.
 
         ## Agent wiring
 
         ```yaml
         enabledConnectors:
-          - connector: hubspot/crm-api
-            operations: [search-deals, get-deal]
+          - connector: jira/platform-api
+            operations: [search-issues, get-issue]
         ```
 
-        Operations listed here are the only ones the agent can call.
+        Operations listed here are the only ones the agent can call. Keep
+        each agent's operation list narrow — gate broad connectors per
+        agent.
 
     # ── On-demand: query patterns ──
     - namespace: sinas
