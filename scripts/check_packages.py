@@ -79,8 +79,12 @@ def variables_for(declarations: list[dict]) -> dict:
 
 
 def counts(apply: dict) -> dict:
-    summary = apply.get("summary") or {}
-    return {action: sum((summary.get(action) or {}).values()) for action in ("created", "updated", "deleted")}
+    """Created / updated / deleted totals from an apply summary. A summary
+    missing any of them is an error, never read as zero changes."""
+    summary = apply.get("summary")
+    if not isinstance(summary, dict) or any(not isinstance(summary.get(a), dict) for a in ("created", "updated", "deleted")):
+        raise CheckFailed(f"install response has no created/updated/deleted summary: {summary!r}")
+    return {action: sum(summary[action].values()) for action in ("created", "updated", "deleted")}
 
 
 def check_package(entry: dict, token: str) -> None:
@@ -121,8 +125,10 @@ def check_way_of_working(token: str) -> None:
         raise CheckFailed("assistant does not preload way-of-working/workbench-loop")
     approvals = agent.get("tool_approvals") or {}
     rules = {r.get("match"): r.get("action") for r in approvals.get("rules") or []}
-    if approvals.get("default") != "auto" or rules.get("workbench_promote") != "ask":
-        raise CheckFailed(f"unexpected tool approvals: {approvals}")
+    gated = ("workbench_promote", "workbench_delete", "write_file_*", "edit_file_*", "delete_file_*")
+    missing = [m for m in gated if rules.get(m) != "ask"]
+    if approvals.get("default") != "auto" or missing:
+        raise CheckFailed(f"tool approvals don't gate {missing} (default {approvals.get('default')!r})")
     skill = call("GET", "/api/v1/skills/way-of-working/workbench-loop", token=token)
     if "workbench" not in (skill.get("content") or ""):
         raise CheckFailed("the workbench-loop skill has no content")
@@ -134,6 +140,10 @@ EXTRA_CHECKS = {"way-of-working": check_way_of_working}
 def main() -> int:
     index = json.loads((ROOT / "index.json").read_text())
     wanted = set(sys.argv[1:])
+    unknown = sorted(wanted - {p["name"] for p in index["packages"]})
+    if unknown:
+        print(f"Not in index.json: {', '.join(unknown)}", file=sys.stderr)
+        return 1
     entries = [p for p in index["packages"] if not wanted or p["name"] in wanted]
     try:
         token = login()
