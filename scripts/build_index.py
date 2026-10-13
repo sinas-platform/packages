@@ -51,6 +51,9 @@ def entry(path: Path) -> dict:
         "sha256": hashlib.sha256(raw).hexdigest(),
         "size": len(raw),
     }
+    if meta.get("multiInstance") is True:
+        # Sinas offers "install another" for these straight from the catalog.
+        out["multiInstance"] = True
     readme = folder / "README.md"
     if readme.exists():
         out["readme"] = readme.relative_to(ROOT).as_posix()

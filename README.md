@@ -54,7 +54,7 @@ packages/
 
 ## The index
 
-`index.json` lists every package in this repository: name, version, description, the path of its `package.yaml` and that file's SHA-256. Sinas reads a package repository through this one file, so it works from any static host. Regenerate it whenever a package changes:
+`index.json` lists every package in this repository: name, version, description, the path of its `package.yaml` and that file's SHA-256, and `multiInstance: true` for packages that can be installed more than once. Sinas reads a package repository through this one file, so it works from any static host. Regenerate it whenever a package changes:
 
 ```bash
 pip install pyyaml
