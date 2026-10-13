@@ -38,6 +38,7 @@ Install the sinas/package-author package
 | [slack](packages/slack/) | ⚠️ Experimental/parked. Slack Web API via bot token incl. inbound events — works, but relies on handler functions until webhook filters/handshake support land. |
 | [telegram](packages/telegram/) | Telegram Bot API: notifications, formatted reports, and fully declarative inbound chat (message the bot → agent replies, per-chat memory). |
 | [github](packages/github/) | GitHub REST API: issues, PRs with diffs, CI runs, code search, notifications, and a declarative issues/PRs/comments webhook. |
+| [way-of-working](packages/way-of-working/) | A preloadable skill that makes an agent work like Claude Code (files in the workbench, verification by code, references instead of pasted content, questions only when blocked), plus an exemplar agent wired for the full loop. Needs the Sinas dev line after 0.4. |
 
 ## Package structure
 
@@ -46,9 +47,32 @@ Each package lives in its own directory under `packages/`:
 ```
 packages/
   my-package/
-    package.yaml     # The installable package (kind: SinasPackage)
+    package.yaml     # The installable package (kind: SinasPackage); the
+                     # folder name must equal package.name
     README.md        # Documentation
 ```
+
+## The index
+
+`index.json` lists every package in this repository: name, version, description, the path of its `package.yaml` and that file's SHA-256. Sinas reads a package repository through this one file, so it works from any static host. Regenerate it whenever a package changes:
+
+```bash
+pip install pyyaml
+python scripts/build_index.py
+```
+
+CI fails a change that leaves `index.json` out of date (`--check`).
+
+## CI
+
+Every pull request starts Sinas (`ghcr.io/sinas-platform/sinas/backend:dev`) and installs every package with `scripts/check_packages.py`: a preview with dummy values for required variables, an install, and a second install that must change nothing. Some packages get extra checks on what they installed. To run it against your own Sinas:
+
+```bash
+SINAS_URL=http://localhost:8000 SINAS_EMAIL=you@example.com SINAS_PASSWORD=... \
+  python scripts/check_packages.py [package ...]
+```
+
+Run it against a throwaway instance: it installs packages for real.
 
 ## Guides
 

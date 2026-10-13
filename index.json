@@ -1,0 +1,110 @@
+{
+  "schema": "sinas.package-index/v1",
+  "repository": {
+    "name": "sinas-official",
+    "title": "Sinas official packages",
+    "url": "https://github.com/sinas-platform/packages"
+  },
+  "packages": [
+    {
+      "name": "ddf-powerpoint",
+      "version": "0.5.1",
+      "description": "Create PowerPoint presentations from DDF YAML using the declarativedocs compiler. Write DDF YAML to the collection, validate it, then compile. Agents use collection file tools for token-efficient surgical edits.",
+      "author": "Sinas",
+      "path": "packages/ddf-powerpoint/package.yaml",
+      "sha256": "d0cf59f84ee970770134af2ac6f20e44d5578d87180c610a7ec5b8ca40662b0f",
+      "size": 22103,
+      "readme": "packages/ddf-powerpoint/README.md"
+    },
+    {
+      "name": "github",
+      "version": "0.1.0",
+      "description": "GitHub integration: REST API connector (issues, pull requests, Actions, code and file access, notifications), search-syntax skill, an assistant agent, and a declarative inbound webhook for repository events.",
+      "author": "Sinas",
+      "path": "packages/github/package.yaml",
+      "sha256": "166a1215024e3e527c9950cb6180c91a0299fba22f4f42067a55d6f92e25dcbb",
+      "size": 20098,
+      "readme": "packages/github/README.md"
+    },
+    {
+      "name": "gmail",
+      "version": "0.1.0",
+      "description": "Gmail integration: Gmail API v1 connector with per-user OAuth, search and message-format skills, and an inbox assistant for triage, summarizing, labeling, and drafting replies.",
+      "author": "Sinas",
+      "path": "packages/gmail/package.yaml",
+      "sha256": "795ccc5d5debf759834adb0af71f9de985aa0da0baa8cd2dbce2f5f1473a4589",
+      "size": 16474,
+      "readme": "packages/gmail/README.md"
+    },
+    {
+      "name": "google-calendar",
+      "version": "0.1.0",
+      "description": "Google Calendar integration: Calendar v3 connector with per-user OAuth (Connect your account), an event-format skill, and a scheduling agent that finds slots, creates and updates events.",
+      "author": "Sinas",
+      "path": "packages/google-calendar/package.yaml",
+      "sha256": "0cc1c720a69f47a14bb6c0c8d59cd7da60b6ffbc4fa4326f856766ba0460ee12",
+      "size": 16019,
+      "readme": "packages/google-calendar/README.md"
+    },
+    {
+      "name": "google-drive-docs",
+      "version": "0.1.0",
+      "description": "Google Drive & Docs integration: Drive v3 and Docs v1 connectors with per-user OAuth, search-syntax and Docs-editing skills, and a librarian agent that finds, reads, creates, and edits documents.",
+      "author": "Sinas",
+      "path": "packages/google-drive-docs/package.yaml",
+      "sha256": "969f8d458a7ed19e16e02448c0939f0ae305a61d49971f82d43f6cdeb11ab8db",
+      "size": 18004,
+      "readme": "packages/google-drive-docs/README.md"
+    },
+    {
+      "name": "jira",
+      "version": "0.1.0",
+      "description": "Jira Cloud integration: connectors for the Platform (REST v3) and Agile APIs, JQL and ADF skills, a general Jira assistant, and an hours-tracker agent for conversational worklog management.",
+      "author": "Sinas",
+      "path": "packages/jira/package.yaml",
+      "sha256": "89a0de6713bacc5f281ce60e033c1bb8ba22c543eede618c85bf0e63dba4c698",
+      "size": 31715,
+      "readme": "packages/jira/README.md"
+    },
+    {
+      "name": "sinas-package-author",
+      "version": "0.4.0",
+      "description": "Skills + reference agent for authoring Sinas Packages. Split into focused skills: schema/workflow (preloaded), plus on-demand patterns for functions, connectors, queries, and agents.",
+      "author": "Sinas",
+      "path": "packages/sinas-package-author/package.yaml",
+      "sha256": "2a17b264bb7a79064b2016e5ebc367057176a20dabff1a1621208d9cae380c9d",
+      "size": 28588,
+      "readme": "packages/sinas-package-author/README.md"
+    },
+    {
+      "name": "slack",
+      "version": "0.1.0",
+      "description": "Slack integration: Web API connector (bot token), mrkdwn formatting skill, and an assistant agent that posts, reads, and summarizes conversations. Inbound events arrive in a later version (pending platform webhook features).",
+      "author": "Sinas",
+      "path": "packages/slack/package.yaml",
+      "sha256": "f04085f4e2ffe956d333b67dedb9c2047886f60c25591ff4c7c8c8a0600284ca",
+      "size": 18013,
+      "readme": "packages/slack/README.md"
+    },
+    {
+      "name": "telegram",
+      "version": "0.1.0",
+      "description": "Telegram Bot API integration: connector for sending and managing messages, bot-basics skill, and a notifier agent. Inbound messages arrive in a later version (pending platform webhook features).",
+      "author": "Sinas",
+      "path": "packages/telegram/package.yaml",
+      "sha256": "eb85aa75ab4eaf6df372c4a3cb89627a6ffea7695d224376cd3972de5b040752",
+      "size": 17839,
+      "readme": "packages/telegram/README.md"
+    },
+    {
+      "name": "way-of-working",
+      "version": "1.0.0",
+      "description": "A preloadable \"way of working\" skill that makes an agent work like Claude Code: deliverables as workbench files, facts verified with code, content moved by reference, collections checked out and promoted, questions only when blocked. Ships with an exemplar agent wired for the full loop.",
+      "author": "Sinas",
+      "path": "packages/way-of-working/package.yaml",
+      "sha256": "eaeca9278a62dda5688b337fc341a1ca21aea42d52a60e66744fd79217bfa528",
+      "size": 8242,
+      "readme": "packages/way-of-working/README.md"
+    }
+  ]
+}

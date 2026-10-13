@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sinas_image:
+        description: Sinas backend image to check the packages against
+        default: ghcr.io/sinas-platform/sinas/backend:dev
+
+permissions:
+  contents: read
+
+jobs:
+  index:
+    name: index.json is up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+      - run: python scripts/build_index.py --check
+
+  install:
+    name: every package installs on Sinas
+    runs-on: ubuntu-latest
+    env:
+      SINAS_IMAGE: ${{ inputs.sinas_image || 'ghcr.io/sinas-platform/sinas/backend:dev' }}
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sinas
+          POSTGRES_PASSWORD: sinas-ci
+          POSTGRES_DB: sinas
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sinas" --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Start Sinas
+        run: |
+          echo "SINAS_EMAIL=ci@example.com" >> "$GITHUB_ENV"
+          password="ci-$(openssl rand -hex 16)"
+          echo "::add-mask::$password"
+          echo "SINAS_PASSWORD=$password" >> "$GITHUB_ENV"
+          docker run -d --name sinas --network host \
+            -e DATABASE_HOST=localhost -e DATABASE_DIRECT_HOST=localhost -e DATABASE_PORT=5432 \
+            -e DATABASE_USER=sinas -e DATABASE_PASSWORD=sinas-ci -e DATABASE_NAME=sinas \
+            -e REDIS_URL=redis://localhost:6379/0 \
+            -e SECRET_KEY="$(openssl rand -hex 32)" \
+            -e ENCRYPTION_KEY="$(python -c 'import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())')" \
+            -e AUTH_MODE=password -e SUPERADMIN_EMAIL=ci@example.com -e SUPERADMIN_PASSWORD="$password" \
+            -e CLICKHOUSE_HOST= -e BUILTIN_DATABASE_ENABLED=false -e CODE_EXECUTION_ENABLED=false \
+            "$SINAS_IMAGE" sh -c "alembic upgrade head && uvicorn app.main:app --host 127.0.0.1 --port 8000"
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8000/health >/dev/null && exit 0
+            sleep 3
+          done
+          docker logs sinas | tail -50
+          exit 1
+      - name: Install every package (twice)
+        env:
+          SINAS_URL: http://localhost:8000
+        run: python scripts/check_packages.py
+      - name: Sinas logs
+        if: failure()
+        run: docker logs sinas | tail -200
