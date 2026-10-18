@@ -30,6 +30,27 @@ REPOSITORY = {
 }
 
 
+REQUIREMENT_KEYS = ("name", "version", "repository", "instance")
+
+
+def requirements(path: Path, value) -> list[dict]:
+    """package.requires, as the index carries it: each requirement's name
+    and, when given, its version range, repository hint and instance."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{path}: package.requires must be a list")
+    out = []
+    for req in value:
+        if not isinstance(req, dict) or not isinstance(req.get("name"), str) or not req["name"]:
+            raise ValueError(f"{path}: every package.requires entry needs a name")
+        unknown = sorted(set(req) - set(REQUIREMENT_KEYS))
+        if unknown:
+            raise ValueError(f"{path}: package.requires '{req['name']}' has unknown keys: {', '.join(unknown)}")
+        out.append({k: str(req[k]) for k in REQUIREMENT_KEYS if req.get(k) is not None})
+    return out
+
+
 def entry(path: Path) -> dict:
     raw = path.read_bytes()
     doc = yaml.safe_load(raw)
@@ -54,6 +75,11 @@ def entry(path: Path) -> dict:
     if meta.get("multiInstance") is True:
         # Sinas offers "install another" for these straight from the catalog.
         out["multiInstance"] = True
+    requires = requirements(path, meta.get("requires"))
+    if requires:
+        # The packages it needs, as declared: Sinas shows them in the catalog.
+        # (Installs read them from the checksummed package.yaml itself.)
+        out["requires"] = requires
     readme = folder / "README.md"
     if readme.exists():
         out["readme"] = readme.relative_to(ROOT).as_posix()
