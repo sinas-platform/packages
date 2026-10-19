@@ -54,7 +54,7 @@ packages/
 
 ## The index
 
-`index.json` lists every package in this repository: name, version, description, the path of its `package.yaml` and that file's SHA-256, and `multiInstance: true` for packages that can be installed more than once. Sinas reads a package repository through this one file, so it works from any static host. Regenerate it whenever a package changes:
+`index.json` lists every package in this repository: name, version, description, the path of its `package.yaml` and that file's SHA-256, `multiInstance: true` for packages that can be installed more than once, and `requires` for packages that need other packages. Sinas reads a package repository through this one file, so it works from any static host. Regenerate it whenever a package changes:
 
 ```bash
 pip install pyyaml
@@ -62,6 +62,21 @@ python scripts/build_index.py
 ```
 
 CI fails a change that leaves `index.json` out of date (`--check`).
+
+A package that needs another one declares it in `package.requires`. Sinas installs a missing requirement first, from its active repositories, refuses to uninstall a package others require, and lets the package's resources refer to the required package's resources by `namespace/name`:
+
+```yaml
+package:
+  name: support-mailbox-triage
+  version: "1.0.0"
+  requires:
+    - name: gmail
+      version: ">=0.1,<1"         # optional: a pyproject-style range
+      repository: sinas-official  # optional: where to look first
+      instance: gmail-support     # optional: which install of a multiInstance package
+```
+
+The index copies each requirement (`name`, and `version`, `repository` and `instance` when given) into the package's entry as `requires`, which the Sinas catalog shows. The field is left out for packages without requirements. Installs always read the requirements from the checksummed `package.yaml` itself.
 
 ## CI
 
